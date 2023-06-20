@@ -332,7 +332,8 @@ fn get_paths() -> Result<(), Box<dyn std::error::Error>> {
             Err(err) => panic!("{}", err),
         }
     }
-    let migrated_query = "SELECT COUNT(*) FROM paths WHERE migrated = 1";
+    println!("🗃️  {} files in database", count);
+    let migrated_query = "SELECT COUNT(*) FROM paths WHERE migrated < 1";
     let migrated = connection
         .prepare(migrated_query)
         .unwrap()
@@ -341,10 +342,19 @@ fn get_paths() -> Result<(), Box<dyn std::error::Error>> {
         .map(|row| row.read::<i64, _>(0))
         .next()
         .unwrap();
+    match migrated {
+        0 => println!("🗄️  No files migrated (or none confirmed migrated)"),
+        _ => println!("🎉 {} already migrated", migrated),
+    }
     let diff = count - migrated;
     match diff {
         0 => println!("🗄️  All files migrated"),
         _ => println!("🗃️  {} files left to migrate", diff),
+    }
+    let percentage = 100 * migrated / count;
+    match percentage {
+        0 => println!("🗄️  No files migrated (or none confirmed migrated)"),
+        _ => println!("🎉 {:.2}% done!", percentage),
     }
     Ok(())
 }
@@ -429,6 +439,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
+                            println!("❌  Database Could not be Updated: {}", statement);
                             panic!("{}", err);
                         }
                     }
