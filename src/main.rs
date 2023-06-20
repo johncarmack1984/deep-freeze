@@ -276,7 +276,8 @@ fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn get_paths() -> Result<(), Box<dyn std::error::Error>> {
+#[async_recursion::async_recursion(?Send)]
+async fn get_paths() {
     let connection = sqlite::open("db.sqlite").unwrap();
     connection
         .execute(
@@ -318,16 +319,20 @@ fn get_paths() -> Result<(), Box<dyn std::error::Error>> {
             "{{\"path\": \"{}\", \"recursive\": true,  \"limit\": 2000}}",
             base_folder
         );
-        let client = reqwest::blocking::Client::new();
+        let client = reqwest::Client::new();
         let res = client
             .post("https://api.dropboxapi.com/2/files/list_folder")
             .headers(headers)
             .body(body)
-            .send()?
-            .text()?;
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
         match add_files_to_list(res) {
             Ok(_) => {
-                return get_paths();
+                get_paths().await;
             }
             Err(err) => panic!("{}", err),
         }
@@ -354,9 +359,8 @@ fn get_paths() -> Result<(), Box<dyn std::error::Error>> {
     let percentage = 100 * migrated / count;
     match percentage {
         0 => println!("🗄️  No files migrated (or none confirmed migrated)"),
-        _ => println!("🎉 {:.2}% done!", percentage),
+        _ => println!("🎉 {}% done!", percentage),
     }
-    Ok(())
 }
 
 async fn get_s3_attrs(
@@ -514,7 +518,7 @@ async fn perform_migration() -> Result<(), Box<dyn std::error::Error>> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     check_account().await;
-    let _gp = get_paths();
+    get_paths().await;
     perform_migration().await?;
     println!("✅✅✅  Migration complete");
     return Ok(());
