@@ -187,7 +187,8 @@ async fn check_account() {
     assert_eq!(json.get("error"), None, "🛑 Not logged in");
 }
 
-fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>> {
+#[async_recursion::async_recursion(?Send)]
+async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>> {
     let json = serde_json::from_str::<serde_json::Value>(&res).unwrap();
     assert_eq!(
         json.get("error"),
@@ -241,14 +242,13 @@ fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+    let access_token = env::var("ACCESS_TOKEN").unwrap();
+    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
     let has_more = json.get("has_more").unwrap().as_bool();
     println!("🗄️  has_more is {}", has_more.unwrap());
-    match has_more {
+    Ok(match has_more {
         Some(true) => {
-            println!("🗄️  Getting next page of results...");
             let cursor = json.get("cursor").unwrap().to_string().to_owned();
-            let access_token = env::var("ACCESS_TOKEN").unwrap();
-            let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
             let mut headers = header::HeaderMap::new();
             headers.insert(
                 "Authorization",
@@ -259,21 +259,26 @@ fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>> {
                 "Dropbox-API-Select-Admin",
                 format!("{}", team_member_id).parse().unwrap(),
             );
+            println!("🗄️  Getting next page of results...");
             let body = format!("{{\"cursor\": {}}}", cursor);
-            let client = reqwest::blocking::Client::new();
+            let client = reqwest::Client::new();
             let res = client
                 .post("https://api.dropboxapi.com/2/files/list_folder/continue")
                 .headers(headers)
                 .body(body)
-                .send()?
-                .text()?;
-            add_files_to_list(res)
+                .send()
+                .await
+                .unwrap()
+                .text()
+                .await
+                .unwrap();
+            println!("🗄️  Adding results to database...");
+            return add_files_to_list(res).await;
         }
         Some(false) | None => {
             println!("✅  File list populated");
-            return Ok(());
         }
-    }
+    })
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -330,7 +335,7 @@ async fn get_paths() {
             .text()
             .await
             .unwrap();
-        match add_files_to_list(res) {
+        match add_files_to_list(res).await {
             Ok(_) => {
                 get_paths().await;
             }
@@ -356,10 +361,9 @@ async fn get_paths() {
         0 => println!("🗄️  All files migrated"),
         _ => println!("🗃️  {} files left to migrate", diff),
     }
-    let percentage = 100 * migrated / count;
-    match percentage {
-        0 => println!("🗄️  No files migrated (or none confirmed migrated)"),
-        _ => println!("🎉 {}% done!", percentage),
+    match diff > 0 {
+        true => println!("🎉 {}% done!", 100 * migrated / count),
+        false => println!("🗄️  No files migrated (or none confirmed migrated)"),
     }
 }
 
