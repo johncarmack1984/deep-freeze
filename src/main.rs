@@ -354,17 +354,6 @@ async fn get_s3_attrs(
     client: &Client,
     bucket: &str,
 ) -> Result<GetObjectAttributesOutput, Error> {
-    let mut base_path = base_path.clone();
-    if base_path.contains("|") {
-        base_path = find_and_replace(&base_path, &["s/\\|/\\|/g"])
-            .unwrap()
-            .to_string();
-    }
-    if base_path.contains("•") {
-        base_path = find_and_replace(&base_path, &["s/•/\\•/g"])
-            .unwrap()
-            .to_string();
-    }
     let res = client
         .get_object_attributes()
         .bucket(bucket)
@@ -375,20 +364,55 @@ async fn get_s3_attrs(
 
     Ok::<GetObjectAttributesOutput, Error>(res)
 }
+
 async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
-    let path = row.try_read::<&str, &str>("path").unwrap();
     let migrated = row.try_read::<i64, &str>("migrated").unwrap();
-    println!("Checking migration status for {}", path);
+    if migrated == 1 {
+        println!("✅ File already migrated");
+    }
+    let path = row.try_read::<&str, &str>("path").unwrap();
+
     let base_folder = env::var("BASE_FOLDER").unwrap();
-    let mut binding = path.clone().to_owned();
-    binding = find_and_replace(&binding, &[format!("s/\\{}\\///g", base_folder)])
-        .unwrap()
-        .to_string();
-    let base_path = find_and_replace(&binding, &["s/channel/Channel/g"])
-        .unwrap()
-        .to_string();
+    let mut base_path = find_and_replace(
+        &path.clone().to_owned(),
+        &[format!("s/\\{}\\///g", base_folder)],
+    )
+    .unwrap()
+    .to_string();
+    if base_path.contains("channel") {
+        base_path = find_and_replace(&base_path, &["s/channel/Channel/g"])
+            .unwrap()
+            .to_string();
+    }
+    if base_path.contains("_") {
+        base_path = find_and_replace(&base_path, &["s/_/\\_/g"])
+            .unwrap()
+            .to_string();
+    }
+    if base_path.contains("|") {
+        base_path = find_and_replace(&base_path, &["s/\\|/\\|/g"])
+            .unwrap()
+            .to_string();
+    }
+    if base_path.contains("•") {
+        base_path = find_and_replace(&base_path, &["s/•/\\•/g"])
+            .unwrap()
+            .to_string();
+    }
     let s3_bucket = env::var("S3_BUCKET").unwrap();
+    if migrated == 0 {
+        // println!("📂  Migrating {}", path);
+        // TODO download_from_db();
+        // verify file size (refactor from below)
+        // TODO verify checksum from DB
+        // TODO create checksum from file for AWS
+        // TODO upload to S3
+        // TODO verify checksum from S3
+        // update migration status
+        // update file list
+    }
     if migrated == -1 {
+        println!("📂  Checking migration status for {}", path);
         let db_size = row.try_read::<i64, &str>("size").unwrap();
         match get_s3_attrs(&base_path, &client, &s3_bucket).await {
             Ok(s3_attrs) => {
@@ -410,6 +434,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                     }
                     return Ok(());
                 } else {
+                    println!("❌ File not the same size on S3 as DB");
                     let connection = sqlite::open("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
@@ -417,7 +442,6 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
-                            println!("❌ File not the same size on S3 as DB");
                             println!("✅ File list updated");
                         }
                         Err(err) => {
@@ -425,7 +449,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                             panic!("{}", err);
                         }
                     }
-                    return Ok(());
+                    // TODO download_from_db();
                 }
             }
             Err(err) => match err {
@@ -453,7 +477,6 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
             },
         }
     }
-    if migrated == 1 {}
     Ok(())
 }
 async fn perform_migration() -> Result<(), Box<dyn std::error::Error>> {
@@ -463,7 +486,7 @@ async fn perform_migration() -> Result<(), Box<dyn std::error::Error>> {
         .or_else("us-east-1");
     let config = aws_config::from_env().region(region_provider).load().await;
     let client = Client::new(&config);
-    let query = "SELECT * FROM paths WHERE migrated < 0";
+    let query = "SELECT * FROM paths WHERE migrated < 1";
     let connection = sqlite::open("db.sqlite").unwrap();
     let rows = connection
         .prepare(query)
