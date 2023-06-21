@@ -129,6 +129,7 @@ async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
 
 #[async_recursion::async_recursion(?Send)]
 async fn check_account() {
+    dotenv().ok();
     println!("🪪  Checking account...");
     let access_token = env::var("ACCESS_TOKEN").unwrap();
     let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
