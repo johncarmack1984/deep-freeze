@@ -2,7 +2,7 @@ extern crate reqwest;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
-use aws_sdk_s3::types::ObjectAttributes;
+use aws_sdk_s3::types::{ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use core::panic;
 use dotenv::dotenv;
@@ -461,6 +461,24 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), St
     return Ok(());
 }
 
+async fn upload_to_s3(
+    client: &AWSClient,
+    s3_path: &str,
+    local_path: &str,
+) -> Result<(), std::io::Error> {
+    println!("📂  Uploading to S3 {}", s3_path);
+    println!("📂  Uploading from {}", local_path);
+    let res = client
+        .create_multipart_upload()
+        .bucket(env::var("S3_BUCKET").unwrap())
+        .key(s3_path)
+        .storage_class(StorageClass::DeepArchive)
+        .send()
+        .await;
+    println!("{}", res.unwrap().upload_id.unwrap());
+    Ok(())
+}
+
 async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Error> {
     let migrated = row.try_read::<i64, &str>("migrated").unwrap();
     if migrated == 1 {
@@ -516,6 +534,9 @@ async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Erro
         // TODO verify checksum from DB
         // TODO create checksum from file for AWS
         // TODO upload to S3
+        let _ul2s3 = upload_to_s3(&client, &base_path, &local_path)
+            .await
+            .unwrap();
         // TODO verify checksum from S3
         // update migration status
         // update file list
