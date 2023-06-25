@@ -12,12 +12,15 @@ use open;
 use reqwest::header;
 use sedregex::find_and_replace;
 use serde_json;
-use sqlite::{self, Row};
+use sqlite;
 use std::cmp::min;
+use std::error::Error;
 use std::fs::File;
 use std::io::{self, Read, Seek, Write};
 use std::path::Path;
+use std::sync::Arc;
 use std::{env, fs};
+use tokio::sync::Semaphore;
 
 fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>> {
     let envpath = Path::new(".env");
@@ -227,7 +230,8 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
             })
             .collect::<Vec<_>>()
             .join("");
-        let connection = sqlite::open("db.sqlite").unwrap();
+        let connection: sqlite::ConnectionWithFullMutex =
+            sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
         statement = format!("INSERT OR IGNORE INTO paths VALUES {};", statement);
         statement = find_and_replace(&statement, &["s/, ;/;/g"])
             .unwrap()
@@ -287,7 +291,7 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
 
 #[async_recursion::async_recursion(?Send)]
 async fn get_paths() {
-    let connection = sqlite::open("db.sqlite").unwrap();
+    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
     connection
         .execute(
             "
@@ -387,11 +391,11 @@ async fn get_s3_attrs(
     Ok::<GetObjectAttributesOutput, AWSError>(res)
 }
 
-async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), String> {
+async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Box<dyn Error>> {
     println!("📂  Downloading {}", dropbox_path);
     // // Reqwest setup
-    let access_token = env::var("ACCESS_TOKEN").unwrap();
-    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
+    let access_token = env::var("ACCESS_TOKEN")?;
+    let team_member_id = env::var("TEAM_MEMBER_ID")?;
     let mut headers = header::HeaderMap::new();
     headers.insert(
         "Authorization",
@@ -409,8 +413,8 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), St
         .post("https://content.dropboxapi.com/2/files/download")
         .headers(headers)
         .send()
-        .await
-        .or(Err(format!("Failed to get {}", dropbox_path)))?;
+        .await?;
+
     let total_size = res.content_length().ok_or(format!(
         "Failed to get content length from '{}'",
         &dropbox_path
@@ -462,13 +466,13 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), St
 }
 
 async fn upload_to_s3(
-    client: &AWSClient,
+    aws_client: &AWSClient,
     s3_path: &str,
     local_path: &str,
 ) -> Result<(), std::io::Error> {
     println!("📂  Uploading to S3 {}", s3_path);
     println!("📂  Uploading from {}", local_path);
-    let res = client
+    let res = aws_client
         .create_multipart_upload()
         .bucket(env::var("S3_BUCKET").unwrap())
         .key(s3_path)
@@ -479,12 +483,15 @@ async fn upload_to_s3(
     Ok(())
 }
 
-async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Error> {
-    let migrated = row.try_read::<i64, &str>("migrated").unwrap();
+async fn migrate_to_s3(
+    aws_client: &AWSClient,
+    migrated: i64,
+    dropbox_path: &str,
+    size: &i64,
+) -> Result<(), std::io::Error> {
     if migrated == 1 {
         println!("✅ File already migrated");
     }
-    let dropbox_path = row.try_read::<&str, &str>("path").unwrap();
 
     let base_name = Path::new(&dropbox_path)
         .file_name()
@@ -534,7 +541,7 @@ async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Erro
         // TODO verify checksum from DB
         // TODO create checksum from file for AWS
         // TODO upload to S3
-        let _ul2s3 = upload_to_s3(&client, &base_path, &local_path)
+        let _ul2s3 = upload_to_s3(&aws_client, &base_path, &local_path)
             .await
             .unwrap();
         // TODO verify checksum from S3
@@ -543,12 +550,12 @@ async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Erro
     }
     if migrated == -1 {
         println!("📂  Checking migration status for {}", dropbox_path);
-        let db_size = row.try_read::<i64, &str>("size").unwrap();
-        match get_s3_attrs(&base_path, &client, &s3_bucket).await {
+        let db_size = size.clone();
+        match get_s3_attrs(&base_path, &aws_client, &s3_bucket).await {
             Ok(s3_attrs) => {
                 if s3_attrs.object_size() == db_size {
                     println!("✅ File already migrated");
-                    let connection = sqlite::open("db.sqlite").unwrap();
+                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 1 WHERE path = '{}';",
                         dropbox_path.clone()
@@ -566,7 +573,7 @@ async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Erro
                     return Ok(());
                 } else {
                     println!("❌ File not the same size on S3 as DB");
-                    let connection = sqlite::open("db.sqlite").unwrap();
+                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
                         dropbox_path.clone()
@@ -586,7 +593,7 @@ async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Erro
             Err(err) => match err {
                 AWSError::NoSuchKey(_) => {
                     println!("❌  File not found in S3");
-                    let connection = sqlite::open("db.sqlite").unwrap();
+                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
                         dropbox_path.clone()
@@ -611,23 +618,44 @@ async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Erro
     Ok(())
 }
 
-async fn perform_migration() -> Result<(), Box<dyn std::error::Error>> {
+async fn perform_migration() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     println!("🗃️ Performing migration...");
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
         .or_else("us-east-1");
     let config = aws_config::from_env().region(region_provider).load().await;
-    let client = AWSClient::new(&config);
+    let aws_client = AWSClient::new(&config);
     let query = "SELECT * FROM paths WHERE migrated < 1";
-    let connection = sqlite::open("db.sqlite").unwrap();
-    let rows = connection
+    let sqlite_connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
+    let rows = sqlite_connection
         .prepare(query)
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
         .collect::<Vec<_>>();
+    let semaphore = Arc::new(Semaphore::new(1)); // Limit to 10 concurrent downloads
+    let mut tasks = Vec::new();
     for row in rows {
-        migrate_to_s3(&client, row).await?;
+        let migrated = row.try_read::<i64, &str>("migrated").unwrap();
+        let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
+        let size = row.try_read::<i64, &str>("size").unwrap();
+        let aws_client = aws_client.clone();
+        let sem_clone = Arc::clone(&semaphore);
+        let task = tokio::spawn(async move {
+            let permit = sem_clone.acquire().await.unwrap();
+            // sqlite_connection.clone();
+            match migrate_to_s3(&aws_client, migrated, &dropbox_path, &size).await {
+                Ok(_) => {}
+                Err(err) => {
+                    println!("{}", err);
+                }
+            };
+            drop(permit); // Release the semaphore
+        });
+        tasks.push(task);
+    }
+    for task in tasks {
+        task.await.unwrap();
     }
     Ok(())
 }
