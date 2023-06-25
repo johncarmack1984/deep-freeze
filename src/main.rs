@@ -3,18 +3,21 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
 use aws_sdk_s3::types::ObjectAttributes;
-use aws_sdk_s3::{Client, Error};
+use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use core::panic;
 use dotenv::dotenv;
+use futures_util::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use open;
 use reqwest::header;
 use sedregex::find_and_replace;
 use serde_json;
 use sqlite::{self, Row};
-use std::env;
+use std::cmp::min;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, Write};
 use std::path::Path;
+use std::{env, fs};
 
 fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>> {
     let envpath = Path::new(".env");
@@ -370,9 +373,9 @@ async fn get_paths() {
 
 async fn get_s3_attrs(
     base_path: &String,
-    client: &Client,
+    client: &AWSClient,
     bucket: &str,
-) -> Result<GetObjectAttributesOutput, Error> {
+) -> Result<GetObjectAttributesOutput, AWSError> {
     let res = client
         .get_object_attributes()
         .bucket(bucket)
@@ -381,19 +384,98 @@ async fn get_s3_attrs(
         .send()
         .await?;
 
-    Ok::<GetObjectAttributesOutput, Error>(res)
+    Ok::<GetObjectAttributesOutput, AWSError>(res)
 }
 
-async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
+async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), String> {
+    println!("📂  Downloading {}", dropbox_path);
+    // // Reqwest setup
+    let access_token = env::var("ACCESS_TOKEN").unwrap();
+    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
+    let mut headers = header::HeaderMap::new();
+    headers.insert(
+        "Authorization",
+        format!("Bearer {}", access_token).parse().unwrap(),
+    );
+    headers.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
+    headers.insert(
+        "Dropbox-API-Arg",
+        format!("{{\"path\":\"{}\"}}", dropbox_path)
+            .parse()
+            .unwrap(),
+    );
+    let client = reqwest::Client::new();
+    let res = client
+        .post("https://content.dropboxapi.com/2/files/download")
+        .headers(headers)
+        .send()
+        .await
+        .or(Err(format!("Failed to get {}", dropbox_path)))?;
+    let total_size = res.content_length().ok_or(format!(
+        "Failed to get content length from '{}'",
+        &dropbox_path
+    ))?;
+
+    // // Indicatif setup
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+        .unwrap()
+        .progress_chars("█  "));
+    let msg = format!("Downloading {}", dropbox_path);
+    pb.set_message(msg);
+
+    let mut file;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+
+    println!("Seeking in file.");
+    if std::path::Path::new(local_path).exists() {
+        println!("File exists. Resuming.");
+        file = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(local_path)
+            .unwrap();
+
+        let file_size = std::fs::metadata(local_path).unwrap().len();
+        file.seek(std::io::SeekFrom::Start(file_size)).unwrap();
+        downloaded = file_size;
+    } else {
+        println!("Fresh file..");
+        file =
+            File::create(local_path).or(Err(format!("Failed to create file '{}'", local_path)))?;
+    }
+
+    println!("Commencing transfer");
+    while let Some(item) = stream.next().await {
+        let chunk = item.or(Err(format!("Error while downloading file")))?;
+        file.write(&chunk)
+            .or(Err(format!("Error while writing to file")))?;
+        let new = min(downloaded + (chunk.len() as u64), total_size);
+        downloaded = new;
+        pb.set_position(new);
+    }
+    let finished_msg = format!("Finished downloading {}", dropbox_path);
+    pb.finish_with_message(finished_msg);
+    return Ok(());
+}
+
+async fn migrate_to_s3(client: &AWSClient, row: Row) -> Result<(), std::io::Error> {
     let migrated = row.try_read::<i64, &str>("migrated").unwrap();
     if migrated == 1 {
         println!("✅ File already migrated");
     }
-    let path = row.try_read::<&str, &str>("path").unwrap();
+    let dropbox_path = row.try_read::<&str, &str>("path").unwrap();
 
+    let base_name = Path::new(&dropbox_path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
     let base_folder = env::var("BASE_FOLDER").unwrap();
     let mut base_path = find_and_replace(
-        &path.clone().to_owned(),
+        &dropbox_path.clone().to_owned(),
         &[format!("s/\\{}\\///g", base_folder)],
     )
     .unwrap()
@@ -404,7 +486,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
             .to_string();
     }
     if base_path.contains("_") {
-        base_path = find_and_replace(&base_path, &["s/_/\\_/g"])
+        base_path = find_and_replace(&base_path, &["s/_/_/g"])
             .unwrap()
             .to_string();
     }
@@ -418,10 +500,18 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
             .unwrap()
             .to_string();
     }
+
     let s3_bucket = env::var("S3_BUCKET").unwrap();
     if migrated == 0 {
+        let local_path = format!("./temp/{}", base_path);
+        let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
+            .unwrap()
+            .to_string();
+        if !std::path::Path::new(&local_dir).exists() {
+            let _dir = fs::create_dir_all(&local_dir)?;
+        }
         // println!("📂  Migrating {}", path);
-        // TODO download_from_db();
+        let _file = download_from_db(&dropbox_path, &local_path).await.unwrap();
         // verify file size (refactor from below)
         // TODO verify checksum from DB
         // TODO create checksum from file for AWS
@@ -431,7 +521,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
         // update file list
     }
     if migrated == -1 {
-        println!("📂  Checking migration status for {}", path);
+        println!("📂  Checking migration status for {}", dropbox_path);
         let db_size = row.try_read::<i64, &str>("size").unwrap();
         match get_s3_attrs(&base_path, &client, &s3_bucket).await {
             Ok(s3_attrs) => {
@@ -440,7 +530,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                     let connection = sqlite::open("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 1 WHERE path = '{}';",
-                        path.clone()
+                        dropbox_path.clone()
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
@@ -458,7 +548,7 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                     let connection = sqlite::open("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
-                        path.clone()
+                        dropbox_path.clone()
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
@@ -473,12 +563,12 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
                 }
             }
             Err(err) => match err {
-                Error::NoSuchKey(_) => {
+                AWSError::NoSuchKey(_) => {
                     println!("❌  File not found in S3");
                     let connection = sqlite::open("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
-                        path.clone()
+                        dropbox_path.clone()
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
@@ -499,13 +589,14 @@ async fn migrate_to_s3(client: &Client, row: Row) -> Result<(), Error> {
     }
     Ok(())
 }
+
 async fn perform_migration() -> Result<(), Box<dyn std::error::Error>> {
     println!("🗃️ Performing migration...");
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
         .or_else("us-east-1");
     let config = aws_config::from_env().region(region_provider).load().await;
-    let client = Client::new(&config);
+    let client = AWSClient::new(&config);
     let query = "SELECT * FROM paths WHERE migrated < 1";
     let connection = sqlite::open("db.sqlite").unwrap();
     let rows = connection

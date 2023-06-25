@@ -3,3 +3,5 @@ paths.txt
 /target
 db.sqlite*
 .dev
+temp
+temp/**/*
