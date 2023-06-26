@@ -708,28 +708,51 @@ async fn migrate_to_s3(
             },
         }
     }
-    if migrated.abs() == 0 {
-        let local_path = format!("./temp/{}", base_path);
-        let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
-            .unwrap()
-            .to_string();
-        if !std::path::Path::new(&local_dir).exists() {
-            let _dir = fs::create_dir_all(&local_dir)?;
+    match migrated.abs() == 0 {
+        true => {
+            let local_path = format!("./temp/{}", base_path);
+            let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
+                .unwrap()
+                .to_string();
+            if !std::path::Path::new(&local_dir).exists() {
+                let _dir = fs::create_dir_all(&local_dir)?;
+            }
+            // println!("📂  Migrating {}", path);
+            let _file = download_from_db(&dropbox_path, &local_path).await.unwrap();
+            // verify file size (refactor from below)
+            // TODO verify checksum from DB
+            // TODO create checksum from file for AWS
+            // TODO upload to S3
+            match upload_to_s3(&aws_client, &base_path, &local_path, &s3_bucket)
+                .await
+                .unwrap()
+            {
+                () => {
+                    println!("✅ File uploaded to S3");
+                    std::fs::remove_file(&local_path).unwrap();
+                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
+                    let statement = format!(
+                        "UPDATE paths SET migrated = 1 WHERE path = '{}';",
+                        dropbox_path.clone()
+                    );
+                    match connection.execute(statement.clone()) {
+                        Ok(_) => {
+                            println!("✅ File list updated");
+                            *migrated = 1;
+                        }
+                        Err(err) => {
+                            println!("❌  Error in statement: {}", statement);
+                            panic!("{}", err);
+                        }
+                    }
+                } // TODO verify checksum from S3
+                  // update migration status
+                  // update file list
+            }
+            Ok(())
         }
-        // println!("📂  Migrating {}", path);
-        let _file = download_from_db(&dropbox_path, &local_path).await.unwrap();
-        // verify file size (refactor from below)
-        // TODO verify checksum from DB
-        // TODO create checksum from file for AWS
-        // TODO upload to S3
-        let _ul2s3 = upload_to_s3(&aws_client, &base_path, &local_path, &s3_bucket)
-            .await
-            .unwrap();
-        // TODO verify checksum from S3
-        // update migration status
-        // update file list
+        false => Ok(()),
     }
-    Ok(())
 }
 
 async fn perform_migration() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
