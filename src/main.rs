@@ -477,7 +477,8 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
     Ok(())
 }
 
-const CHUNK_SIZE: u64 = 1024 * 1024 * 7;
+const MIN_CHUNK_SIZE: u64 = 5000000;
+const MAX_CHUNK_SIZE: u64 = 5000000000;
 const MAX_CHUNKS: u64 = 10000;
 
 async fn upload_to_s3(
@@ -504,10 +505,20 @@ async fn upload_to_s3(
         .expect("it exists I swear")
         .len();
 
-    let mut chunk_count = (file_size / CHUNK_SIZE) + 1;
-    let mut size_of_last_chunk = file_size % CHUNK_SIZE;
+    let mut chunk_size = MIN_CHUNK_SIZE;
+
+    while file_size / chunk_size > MAX_CHUNKS {
+        chunk_size *= 2;
+    }
+
+    while chunk_size > MAX_CHUNK_SIZE {
+        chunk_size -= 1000;
+    }
+
+    let mut chunk_count = (file_size / chunk_size) + 1;
+    let mut size_of_last_chunk = file_size % chunk_size;
     if size_of_last_chunk == 0 {
-        size_of_last_chunk = CHUNK_SIZE;
+        size_of_last_chunk = chunk_size;
         chunk_count -= 1;
     }
 
@@ -534,9 +545,9 @@ async fn upload_to_s3(
         let this_chunk = if chunk_count - 1 == chunk_index {
             size_of_last_chunk
         } else {
-            CHUNK_SIZE
+            chunk_size
         };
-        let uploaded = chunk_index * CHUNK_SIZE;
+        let uploaded = chunk_index * chunk_size;
         pb.set_message(format!(
             "⬆️  Uploading chunk {} of {}.",
             chunk_index + 1,
