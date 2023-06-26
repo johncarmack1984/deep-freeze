@@ -476,7 +476,7 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
     Ok(())
 }
 
-const CHUNK_SIZE: u64 = 1024 * 1024 * 5;
+const CHUNK_SIZE: u64 = 1024 * 1024 * 7;
 const MAX_CHUNKS: u64 = 10000;
 
 async fn upload_to_s3(
