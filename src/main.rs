@@ -421,24 +421,25 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
         &dropbox_path
     ))?;
 
+    println!("⬇️  Checking for saved spot in download...");
+
     // // Indicatif setup
     let pb = ProgressBar::new(total_size);
     pb.set_style(ProgressStyle::default_bar()
         .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .progress_chars("█  "));
-    let msg = format!("📁 Downloading {}", dropbox_path);
+    let msg = format!("⬇️ Downloading {}", dropbox_path);
     pb.set_message(msg);
 
     let mut file;
     let mut downloaded: u64 = 0;
     let mut stream = res.bytes_stream();
 
-    println!("🔍  Seeking in file.");
     if std::path::Path::new(local_path).exists()
         && std::fs::metadata(local_path).unwrap().is_dir() == false
     {
-        println!("🕵️‍♂️  File exists. Resuming.");
+        println!("⬇️  File exists. Resuming.");
         file = std::fs::OpenOptions::new()
             .read(true)
             .append(true)
@@ -451,27 +452,27 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
     } else if std::path::Path::new(local_path).exists()
         && std::fs::metadata(local_path).unwrap().is_dir() == true
     {
-        println!("🕵️‍♂️  Key exists as directory. Erasing.");
+        println!("⌫  Key exists as directory. Erasing.");
         std::fs::remove_dir(local_path).unwrap();
-        println!("🕵️‍♂️  Fresh file..");
+        println!("⬇️  Fresh file.");
         file = File::create(local_path)
             .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
     } else {
-        println!("🕵️‍♂️  Fresh file..");
+        println!("⬇️  Fresh file.");
         file = File::create(local_path)
             .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
     }
 
     println!("Commencing transfer");
     while let Some(item) = stream.next().await {
-        let chunk = item.or(Err(format!("Error while downloading file")))?;
+        let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
         file.write(&chunk)
-            .or(Err(format!("Error while writing to file")))?;
+            .or(Err(format!("❌  Error while writing to file")))?;
         let new = min(downloaded + (chunk.len() as u64), total_size);
         downloaded = new;
         pb.set_position(new);
     }
-    let finished_msg = format!("✅  Finished downloading {}", dropbox_path);
+    let finished_msg = format!("🎉  Finished downloading {}", dropbox_path);
     pb.finish_with_message(finished_msg);
     Ok(())
 }
@@ -485,7 +486,7 @@ async fn upload_to_s3(
     local_path: &str,
     s3_bucket: &str,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    println!("📂  Uploading to S3 {}", s3_path);
+    println!("📂  Uploading to s3://{}/{}", s3_bucket, s3_path);
     println!("📂  Uploading from {}", local_path);
     let res = aws_client
         .create_multipart_upload()
@@ -570,7 +571,7 @@ async fn upload_to_s3(
         pb.set_position(uploaded + this_chunk);
         // snippet-end:[rust.example_code.s3.upload_part]
     }
-    pb.finish_with_message("✅  All chunks uploaded.");
+    pb.finish_with_message("🎉  All chunks uploaded.");
     // snippet-start:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
     let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
         .set_parts(Some(upload_parts))
@@ -652,7 +653,7 @@ async fn migrate_to_s3(
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
-                            println!("✅ File list updated");
+                            println!("📁 File list updated");
                             *migrated = 1;
                         }
                         Err(err) => {
@@ -671,8 +672,8 @@ async fn migrate_to_s3(
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
-                            println!("✅ File list updated");
                             *migrated = 0;
+                            println!("📁 File list updated");
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
@@ -692,8 +693,8 @@ async fn migrate_to_s3(
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
-                            println!("✅ File list updated");
                             *migrated = 0;
+                            println!("📁 File list updated");
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
@@ -737,8 +738,8 @@ async fn migrate_to_s3(
                     );
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
-                            println!("✅ File list updated");
                             *migrated = 1;
+                            println!("📁 File list updated");
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
