@@ -2,8 +2,10 @@ extern crate reqwest;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
-use aws_sdk_s3::types::{ObjectAttributes, StorageClass};
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
+use aws_smithy_http::byte_stream::Length;
 use core::panic;
 use dotenv::dotenv;
 use futures_util::StreamExt;
@@ -392,7 +394,6 @@ async fn get_s3_attrs(
 }
 
 async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Box<dyn Error>> {
-    println!("📂  Downloading {}", dropbox_path);
     // // Reqwest setup
     let access_token = env::var("ACCESS_TOKEN")?;
     let team_member_id = env::var("TEAM_MEMBER_ID")?;
@@ -423,19 +424,21 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
     // // Indicatif setup
     let pb = ProgressBar::new(total_size);
     pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+        .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .progress_chars("█  "));
-    let msg = format!("Downloading {}", dropbox_path);
+    let msg = format!("📁 Downloading {}", dropbox_path);
     pb.set_message(msg);
 
     let mut file;
     let mut downloaded: u64 = 0;
     let mut stream = res.bytes_stream();
 
-    println!("Seeking in file.");
-    if std::path::Path::new(local_path).exists() {
-        println!("File exists. Resuming.");
+    println!("🔍  Seeking in file.");
+    if std::path::Path::new(local_path).exists()
+        && std::fs::metadata(local_path).unwrap().is_dir() == false
+    {
+        println!("🕵️‍♂️  File exists. Resuming.");
         file = std::fs::OpenOptions::new()
             .read(true)
             .append(true)
@@ -445,10 +448,18 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
         let file_size = std::fs::metadata(local_path).unwrap().len();
         file.seek(std::io::SeekFrom::Start(file_size)).unwrap();
         downloaded = file_size;
+    } else if std::path::Path::new(local_path).exists()
+        && std::fs::metadata(local_path).unwrap().is_dir() == true
+    {
+        println!("🕵️‍♂️  Key exists as directory. Erasing.");
+        std::fs::remove_dir(local_path).unwrap();
+        println!("🕵️‍♂️  Fresh file..");
+        file = File::create(local_path)
+            .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
     } else {
-        println!("Fresh file..");
-        file =
-            File::create(local_path).or(Err(format!("Failed to create file '{}'", local_path)))?;
+        println!("🕵️‍♂️  Fresh file..");
+        file = File::create(local_path)
+            .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
     }
 
     println!("Commencing transfer");
@@ -460,37 +471,137 @@ async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Bo
         downloaded = new;
         pb.set_position(new);
     }
-    let finished_msg = format!("Finished downloading {}", dropbox_path);
+    let finished_msg = format!("✅  Finished downloading {}", dropbox_path);
     pb.finish_with_message(finished_msg);
-    return Ok(());
+    Ok(())
 }
+
+const CHUNK_SIZE: u64 = 1024 * 1024 * 5;
+const MAX_CHUNKS: u64 = 10000;
 
 async fn upload_to_s3(
     aws_client: &AWSClient,
     s3_path: &str,
     local_path: &str,
-) -> Result<(), std::io::Error> {
+    s3_bucket: &str,
+) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     println!("📂  Uploading to S3 {}", s3_path);
     println!("📂  Uploading from {}", local_path);
     let res = aws_client
         .create_multipart_upload()
-        .bucket(env::var("S3_BUCKET").unwrap())
+        .bucket(s3_bucket)
         .key(s3_path)
         .storage_class(StorageClass::DeepArchive)
         .send()
-        .await;
-    println!("{}", res.unwrap().upload_id.unwrap());
+        .await
+        .unwrap();
+    let upload_id = res.upload_id().unwrap();
+
+    let path = Path::new(local_path);
+    let file_size = tokio::fs::metadata(path)
+        .await
+        .expect("it exists I swear")
+        .len();
+
+    let mut chunk_count = (file_size / CHUNK_SIZE) + 1;
+    let mut size_of_last_chunk = file_size % CHUNK_SIZE;
+    if size_of_last_chunk == 0 {
+        size_of_last_chunk = CHUNK_SIZE;
+        chunk_count -= 1;
+    }
+
+    if file_size == 0 {
+        panic!("Bad file size.");
+    }
+    if chunk_count > MAX_CHUNKS {
+        panic!("Too many chunks! Try increasing your chunk size.")
+    }
+
+    let mut upload_parts: Vec<CompletedPart> = Vec::new();
+
+    println!("⬆️  Uploading {} chunks.", chunk_count);
+
+    let pb = ProgressBar::new(file_size);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+        .unwrap()
+        .progress_chars("█  "));
+    let msg = format!("⬆️  Uploading {} to {}", s3_path, s3_bucket);
+    pb.set_message(msg);
+
+    for chunk_index in 0..chunk_count {
+        let this_chunk = if chunk_count - 1 == chunk_index {
+            size_of_last_chunk
+        } else {
+            CHUNK_SIZE
+        };
+        let uploaded = chunk_index * CHUNK_SIZE;
+        pb.set_message(format!(
+            "⬆️  Uploading chunk {} of {}.",
+            chunk_index + 1,
+            chunk_count
+        ));
+        let stream = ByteStream::read_from()
+            .path(Path::new(local_path))
+            .offset(uploaded)
+            .length(Length::Exact(this_chunk))
+            .build()
+            .await
+            .unwrap();
+        //Chunk index needs to start at 0, but part numbers start at 1.
+        let part_number = (chunk_index as i32) + 1;
+        // snippet-start:[rust.example_code.s3.upload_part]
+        let upload_part_res = aws_client
+            .upload_part()
+            .key(s3_path)
+            .bucket(s3_bucket)
+            .upload_id(upload_id)
+            .body(stream)
+            // .body(stream.to_multipart_s3_stream())
+            .part_number(part_number)
+            .send()
+            .await?;
+        upload_parts.push(
+            CompletedPart::builder()
+                .e_tag(upload_part_res.e_tag.unwrap_or_default())
+                .part_number(part_number)
+                .build(),
+        );
+        pb.set_position(uploaded + this_chunk);
+        // snippet-end:[rust.example_code.s3.upload_part]
+    }
+    pb.finish_with_message("✅  All chunks uploaded.");
+    // snippet-start:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
+    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+        .set_parts(Some(upload_parts))
+        .build();
+    // snippet-end:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
+    println!("⏳  Completing upload.");
+    // snippet-start:[rust.example_code.s3.complete_multipart_upload]
+    let _complete_multipart_upload_res = aws_client
+        .complete_multipart_upload()
+        .bucket(s3_bucket)
+        .key(s3_path)
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(upload_id)
+        .send()
+        .await
+        .unwrap();
+    // // snippet-end:[rust.example_code.s3.complete_multipart_upload]
+    println!("✅ Done uploading file.");
+
     Ok(())
 }
 
 async fn migrate_to_s3(
     aws_client: &AWSClient,
-    migrated: i64,
+    migrated: &mut i64,
     dropbox_path: &str,
     size: &i64,
 ) -> Result<(), std::io::Error> {
-    if migrated == 1 {
+    if migrated.is_positive() {
         println!("✅ File already migrated");
+        return Ok(());
     }
 
     let base_name = Path::new(&dropbox_path)
@@ -527,28 +638,7 @@ async fn migrate_to_s3(
     }
 
     let s3_bucket = env::var("S3_BUCKET").unwrap();
-    if migrated == 0 {
-        let local_path = format!("./temp/{}", base_path);
-        let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
-            .unwrap()
-            .to_string();
-        if !std::path::Path::new(&local_dir).exists() {
-            let _dir = fs::create_dir_all(&local_dir)?;
-        }
-        // println!("📂  Migrating {}", path);
-        let _file = download_from_db(&dropbox_path, &local_path).await.unwrap();
-        // verify file size (refactor from below)
-        // TODO verify checksum from DB
-        // TODO create checksum from file for AWS
-        // TODO upload to S3
-        let _ul2s3 = upload_to_s3(&aws_client, &base_path, &local_path)
-            .await
-            .unwrap();
-        // TODO verify checksum from S3
-        // update migration status
-        // update file list
-    }
-    if migrated == -1 {
+    if migrated.is_negative() {
         println!("📂  Checking migration status for {}", dropbox_path);
         let db_size = size.clone();
         match get_s3_attrs(&base_path, &aws_client, &s3_bucket).await {
@@ -563,6 +653,7 @@ async fn migrate_to_s3(
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
                             println!("✅ File list updated");
+                            *migrated = 1;
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
@@ -581,6 +672,7 @@ async fn migrate_to_s3(
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
                             println!("✅ File list updated");
+                            *migrated = 0;
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
@@ -601,6 +693,7 @@ async fn migrate_to_s3(
                     match connection.execute(statement.clone()) {
                         Ok(_) => {
                             println!("✅ File list updated");
+                            *migrated = 0;
                         }
                         Err(err) => {
                             println!("❌  Error in statement: {}", statement);
@@ -614,6 +707,27 @@ async fn migrate_to_s3(
                 }
             },
         }
+    }
+    if migrated.abs() == 0 {
+        let local_path = format!("./temp/{}", base_path);
+        let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
+            .unwrap()
+            .to_string();
+        if !std::path::Path::new(&local_dir).exists() {
+            let _dir = fs::create_dir_all(&local_dir)?;
+        }
+        // println!("📂  Migrating {}", path);
+        let _file = download_from_db(&dropbox_path, &local_path).await.unwrap();
+        // verify file size (refactor from below)
+        // TODO verify checksum from DB
+        // TODO create checksum from file for AWS
+        // TODO upload to S3
+        let _ul2s3 = upload_to_s3(&aws_client, &base_path, &local_path, &s3_bucket)
+            .await
+            .unwrap();
+        // TODO verify checksum from S3
+        // update migration status
+        // update file list
     }
     Ok(())
 }
@@ -636,7 +750,7 @@ async fn perform_migration() -> Result<(), Box<(dyn std::error::Error + 'static)
     let semaphore = Arc::new(Semaphore::new(1)); // Limit to 10 concurrent downloads
     let mut tasks = Vec::new();
     for row in rows {
-        let migrated = row.try_read::<i64, &str>("migrated").unwrap();
+        let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
         let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
         let size = row.try_read::<i64, &str>("size").unwrap();
         let aws_client = aws_client.clone();
@@ -644,7 +758,7 @@ async fn perform_migration() -> Result<(), Box<(dyn std::error::Error + 'static)
         let task = tokio::spawn(async move {
             let permit = sem_clone.acquire().await.unwrap();
             // sqlite_connection.clone();
-            match migrate_to_s3(&aws_client, migrated, &dropbox_path, &size).await {
+            match migrate_to_s3(&aws_client, &mut migrated, &dropbox_path, &size).await {
                 Ok(_) => {}
                 Err(err) => {
                     println!("{}", err);
@@ -666,5 +780,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     get_paths().await;
     perform_migration().await?;
     println!("✅✅✅  Migration complete");
-    return Ok(());
+    Ok(())
 }
