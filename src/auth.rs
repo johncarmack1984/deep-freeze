@@ -1,5 +1,6 @@
-use crate::setenv;
-pub(crate) use reqwest::header::HeaderMap;
+use crate::util::setenv;
+use open;
+use reqwest::header::HeaderMap;
 use std::env;
 use std::io::{self, Write};
 
