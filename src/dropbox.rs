@@ -1,6 +1,7 @@
 use reqwest::header::HeaderMap;
 use sedregex::find_and_replace;
 use std::{env, error::Error};
+// use indicatif::{ProgressBar, ProgressStyle};
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn add_files_to_list(
@@ -157,7 +158,7 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
         }
     }
     println!("🗃️  {} files in database", count);
-    let migrated_query = "SELECT COUNT(*) FROM paths WHERE migrated < 1";
+    let migrated_query = "SELECT COUNT(*) FROM paths WHERE migrated = 1";
     let migrated = connection
         .prepare(migrated_query)
         .unwrap()
@@ -173,11 +174,10 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
     let diff = count - migrated;
     match diff {
         0 => println!("🗄️  All files migrated"),
-        _ => println!("🗃️  {} files left to migrate", diff),
-    }
-    match diff > 0 {
-        true => println!("🎉 {}% done!", 100 * migrated / count),
-        false => println!("🗄️  No files migrated (or none confirmed migrated)"),
+        _ => {
+            println!("🗃️  {} files left to migrate", diff);
+            println!("🎉 {}% done!", 100 * migrated / count)
+        }
     }
 }
 

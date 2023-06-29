@@ -1,9 +1,24 @@
-// use aws_sdk_s3::primitives::ByteStream;
-// use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
-// use aws_smithy_http::byte_stream::Length;
+use aws_config::meta::region::RegionProviderChain;
+use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
 use aws_sdk_s3::types::{ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
+// use aws_sdk_s3::primitives::ByteStream;
+// use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
+// use aws_smithy_http::byte_stream::Length;
+// use indicatif::{ProgressBar, ProgressStyle};
+
+// const MIN_CHUNK_SIZE: u64 = 5000000;
+// const MAX_CHUNK_SIZE: u64 = 5000000000;
+// const MAX_CHUNKS: u64 = 10000;
+
+pub async fn new_client() -> AWSClient {
+    let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
+        .or_default_provider()
+        .or_else("us-east-1");
+    let config = aws_config::from_env().region(region_provider).load().await;
+    AWSClient::new(&config)
+}
 
 pub async fn get_s3_attrs(
     base_path: &String,
@@ -20,10 +35,6 @@ pub async fn get_s3_attrs(
 
     Ok::<GetObjectAttributesOutput, AWSError>(res)
 }
-
-// const MIN_CHUNK_SIZE: u64 = 5000000;
-// const MAX_CHUNK_SIZE: u64 = 5000000000;
-// const MAX_CHUNKS: u64 = 10000;
 
 pub async fn upload_to_s3(
     aws_client: &AWSClient,
