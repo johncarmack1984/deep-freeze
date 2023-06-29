@@ -1,28 +1,25 @@
-extern crate reqwest;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
+// use aws_sdk_s3::primitives::ByteStream;
+// use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
+use aws_sdk_s3::types::{ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
-use aws_smithy_http::byte_stream::Length;
-use core::panic;
+// use aws_smithy_http::byte_stream::Length;
+// use core::panic;
 use dotenv::dotenv;
-use futures_util::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
-use open;
-use reqwest::header;
+use futures::executor::block_on;
+// use futures_util::StreamExt;
+// use indicatif::{ProgressBar, ProgressStyle};
+// use open;
+use reqwest::header::HeaderMap;
 use sedregex::find_and_replace;
-use serde_json;
-use sqlite;
-use std::cmp::min;
-use std::error::Error;
-use std::fs::File;
-use std::io::{self, Read, Seek, Write};
-use std::path::Path;
-use std::sync::Arc;
-use std::{env, fs};
-use tokio::sync::Semaphore;
+// use std::io::{self, Read, Seek, Write};
+use std::io::{self, Read, Write};
+// use std::sync::Arc;
+// use std::{cmp::min, env, error::Error, fs, fs::File, path::Path};
+use std::{env, error::Error, fs::File, path::Path};
+// use tokio::sync::Semaphore;
 
 fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>> {
     let envpath = Path::new(".env");
@@ -63,7 +60,7 @@ async fn login() -> Result<(), Box<dyn std::error::Error>> {
     let authorization_code = prompt("🪪  Paste the authorization code you see here");
 
     println!("🔐 Requesting access token...");
-    let mut headers = header::HeaderMap::new();
+    let mut headers = HeaderMap::new();
     headers.insert(
         "Content-Type",
         "application/x-www-form-urlencoded".parse().unwrap(),
@@ -107,7 +104,7 @@ async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
     let refresh_token = env::var("REFRESH_TOKEN").unwrap();
     let app_key = env::var("APP_KEY").unwrap();
     let app_secret = env::var("APP_SECRET").unwrap();
-    let mut headers = header::HeaderMap::new();
+    let mut headers = HeaderMap::new();
     headers.insert(
         "Content-Type",
         "application/x-www-form-urlencoded".parse().unwrap(),
@@ -126,22 +123,31 @@ async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
         .text()
         .await?;
     let json = serde_json::from_str::<serde_json::Value>(&res).unwrap();
-    assert_eq!(json.get("error"), None, "🛑 Not logged in");
-    let access_token = json.get("access_token").unwrap().to_string().to_owned();
-    match setenv("ACCESS_TOKEN", access_token) {
-        Ok(_) => println!("🔑 Access token set"),
-        Err(err) => println!("{}", err),
+    match json.get("error_summary").map(|s| s.as_str().unwrap()) {
+        Some(result) => panic!("🛑 {result}"),
+        None => {
+            let access_token = json.get("access_token").unwrap().to_string().to_owned();
+            assert_ne!(access_token, "null", "🛑  Access Token Null");
+            assert_ne!(
+                access_token,
+                env::var("ACCESS_TOKEN").unwrap(),
+                "🛑  Access Token Unchanged"
+            );
+            match setenv("ACCESS_TOKEN", access_token) {
+                Ok(_) => Ok(println!("🔑 Access token set")),
+                Err(err) => panic!("{err}"),
+            }
+        }
     }
-    Ok(())
 }
 
 #[async_recursion::async_recursion(?Send)]
 async fn check_account() {
-    dotenv().ok();
     println!("🪪  Checking account...");
-    let access_token = env::var("ACCESS_TOKEN").unwrap();
+    let access_token =
+        env::var("ACCESS_TOKEN").unwrap_or("❌  Could not find access token.".to_string());
     let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
-    let mut headers = header::HeaderMap::new();
+    let mut headers = HeaderMap::new();
     headers.insert(
         "Authorization",
         format!("Bearer {}", access_token).parse().unwrap(),
@@ -165,39 +171,29 @@ async fn check_account() {
         Some("expired_access_token/") => {
             println!("🔑 Access token expired");
             match refresh_token().await {
-                Ok(_) => {
-                    println!("🔑 Refreshed access token");
-                    check_account().await;
-                }
-                Err(err) => {
-                    println!("{}", err);
-                }
+                Ok(_) => println!("🔑 Refreshed access token"),
+                Err(err) => println!("{}", err),
             }
         }
         Some("invalid_access_token/") => {
             println!("🔑 Access token invalid");
             match login().await {
-                Ok(_) => {
-                    println!("🔑 Logged in");
-                    check_account().await;
-                }
-                Err(err) => {
-                    println!("{}", err);
-                }
+                Ok(_) => println!("🔑 Logged in"),
+                Err(err) => println!("{}", err),
             }
         }
-        Some(err) => {
-            println!("{}", err);
-        }
+        Some(result) => println!("{result}"),
         None => {
             println!("👤 Logged in as {}", json.get("email").unwrap());
         }
     }
-    assert_eq!(json.get("error"), None, "🛑 Not logged in");
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>> {
+async fn add_files_to_list(
+    res: String,
+    connection: &sqlite::ConnectionWithFullMutex,
+) -> Result<(), Box<dyn std::error::Error>> {
     let json = serde_json::from_str::<serde_json::Value>(&res).unwrap();
     assert_eq!(
         json.get("error"),
@@ -212,7 +208,7 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
         .iter()
         .filter(|row| row.get(".tag").unwrap().as_str().unwrap() == "file")
         .count();
-    println!("🗄️  {} files found", count);
+    println!("🗄️  {count} files found");
     if count > 0 {
         let entries = json.get("entries").unwrap().as_array().unwrap();
         let mut statement = entries
@@ -232,8 +228,6 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
             })
             .collect::<Vec<_>>()
             .join("");
-        let connection: sqlite::ConnectionWithFullMutex =
-            sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
         statement = format!("INSERT OR IGNORE INTO paths VALUES {};", statement);
         statement = find_and_replace(&statement, &["s/, ;/;/g"])
             .unwrap()
@@ -259,7 +253,7 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
     Ok(match has_more {
         Some(true) => {
             let cursor = json.get("cursor").unwrap().to_string().to_owned();
-            let mut headers = header::HeaderMap::new();
+            let mut headers = HeaderMap::new();
             headers.insert(
                 "Authorization",
                 format!("Bearer {}", access_token).parse().unwrap(),
@@ -283,7 +277,7 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
                 .await
                 .unwrap();
             println!("🗄️  Adding results to database...");
-            return add_files_to_list(res).await;
+            return add_files_to_list(res, &connection).await;
         }
         Some(false) | None => {
             println!("✅  File list populated");
@@ -292,18 +286,17 @@ async fn add_files_to_list(res: String) -> Result<(), Box<dyn std::error::Error>
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn get_paths() {
-    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
+async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
     connection
         .execute(
             "
-        CREATE TABLE IF NOT EXISTS paths (
-            path TEXT NOT NULL UNIQUE,
-            size INTEGER NOT NULL,
-            hash TEXT NOT NULL,
-            migrated INTEGER NOT NULL DEFAULT -1
-        );
-        ",
+            CREATE TABLE IF NOT EXISTS paths (
+                path TEXT NOT NULL UNIQUE,
+                size INTEGER NOT NULL,
+                hash TEXT NOT NULL,
+                migrated INTEGER NOT NULL DEFAULT -1
+            );
+            ",
         )
         .unwrap();
     let count_query = "SELECT COUNT(*) FROM paths";
@@ -320,7 +313,7 @@ async fn get_paths() {
         let access_token = env::var("ACCESS_TOKEN").unwrap();
         let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
         let base_folder = env::var("BASE_FOLDER").unwrap();
-        let mut headers = header::HeaderMap::new();
+        let mut headers = HeaderMap::new();
         headers.insert(
             "Authorization",
             format!("Bearer {}", access_token).parse().unwrap(),
@@ -345,11 +338,9 @@ async fn get_paths() {
             .text()
             .await
             .unwrap();
-        match add_files_to_list(res).await {
-            Ok(_) => {
-                get_paths().await;
-            }
-            Err(err) => panic!("{}", err),
+        match add_files_to_list(res, &connection).await {
+            Ok(_) => get_paths(&connection).await,
+            Err(err) => panic!("{err}"),
         }
     }
     println!("🗃️  {} files in database", count);
@@ -395,91 +386,92 @@ async fn get_s3_attrs(
 
 async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Box<dyn Error>> {
     // // Reqwest setup
-    let access_token = env::var("ACCESS_TOKEN")?;
-    let team_member_id = env::var("TEAM_MEMBER_ID")?;
-    let mut headers = header::HeaderMap::new();
-    headers.insert(
-        "Authorization",
-        format!("Bearer {}", access_token).parse().unwrap(),
-    );
-    headers.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
-    headers.insert(
-        "Dropbox-API-Arg",
-        format!("{{\"path\":\"{}\"}}", dropbox_path)
-            .parse()
-            .unwrap(),
-    );
-    let client = reqwest::Client::new();
-    let res = client
-        .post("https://content.dropboxapi.com/2/files/download")
-        .headers(headers)
-        .send()
-        .await?;
+    // let access_token = env::var("ACCESS_TOKEN")?;
+    // let team_member_id = env::var("TEAM_MEMBER_ID")?;
+    // let mut headers = HeaderMap::new();
+    // headers.insert(
+    //     "Authorization",
+    //     format!("Bearer {}", access_token).parse().unwrap(),
+    // );
+    // headers.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
+    // headers.insert(
+    //     "Dropbox-API-Arg",
+    //     format!("{{\"path\":\"{}\"}}", dropbox_path)
+    //         .parse()
+    //         .unwrap(),
+    // );
+    // let client = reqwest::Client::new();
+    // let res = client
+    //     .post("https://content.dropboxapi.com/2/files/download")
+    //     .headers(headers)
+    //     .send()
+    //     .await?;
 
-    let total_size = res.content_length().ok_or(format!(
-        "Failed to get content length from '{}'",
-        &dropbox_path
-    ))?;
+    // let total_size = res.content_length().ok_or(format!(
+    //     "Failed to get content length from '{}'",
+    //     &dropbox_path
+    // ))?;
 
-    println!("⬇️  Checking for saved spot in download...");
+    println!("⬇️  Checking for saved spot in download {dropbox_path}");
+    println!("⬇️  Checking for saved spot in download {local_path}");
 
     // // Indicatif setup
-    let pb = ProgressBar::new(total_size);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .unwrap()
-        .progress_chars("█  "));
-    let msg = format!("⬇️ Downloading {}", dropbox_path);
-    pb.set_message(msg);
+    // let pb = ProgressBar::new(total_size);
+    // pb.set_style(ProgressStyle::default_bar()
+    //     .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+    //     .unwrap()
+    //     .progress_chars("█  "));
+    // let msg = format!("⬇️ Downloading {}", dropbox_path);
+    // pb.set_message(msg);
 
-    let mut file;
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
+    // let mut file;
+    // let mut downloaded: u64 = 0;
+    // let mut stream = res.bytes_stream();
 
-    if std::path::Path::new(local_path).exists()
-        && std::fs::metadata(local_path).unwrap().is_dir() == false
-    {
-        println!("⬇️  File exists. Resuming.");
-        file = std::fs::OpenOptions::new()
-            .read(true)
-            .append(true)
-            .open(local_path)
-            .unwrap();
+    // if std::path::Path::new(local_path).exists()
+    //     && std::fs::metadata(local_path).unwrap().is_dir() == false
+    // {
+    //     println!("⬇️  File exists. Resuming.");
+    //     file = std::fs::OpenOptions::new()
+    //         .read(true)
+    //         .append(true)
+    //         .open(local_path)
+    //         .unwrap();
 
-        let file_size = std::fs::metadata(local_path).unwrap().len();
-        file.seek(std::io::SeekFrom::Start(file_size)).unwrap();
-        downloaded = file_size;
-    } else if std::path::Path::new(local_path).exists()
-        && std::fs::metadata(local_path).unwrap().is_dir() == true
-    {
-        println!("⌫  Key exists as directory. Erasing.");
-        std::fs::remove_dir(local_path).unwrap();
-        println!("⬇️  Fresh file.");
-        file = File::create(local_path)
-            .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
-    } else {
-        println!("⬇️  Fresh file.");
-        file = File::create(local_path)
-            .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
-    }
+    //     let file_size = std::fs::metadata(local_path).unwrap().len();
+    //     file.seek(std::io::SeekFrom::Start(file_size)).unwrap();
+    //     downloaded = file_size;
+    // } else if std::path::Path::new(local_path).exists()
+    //     && std::fs::metadata(local_path).unwrap().is_dir() == true
+    // {
+    //     println!("⌫  Key exists as directory. Erasing.");
+    //     std::fs::remove_dir(local_path).unwrap();
+    //     println!("⬇️  Fresh file.");
+    //     file = File::create(local_path)
+    //         .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
+    // } else {
+    //     println!("⬇️  Fresh file.");
+    //     file = File::create(local_path)
+    //         .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
+    // }
 
-    println!("Commencing transfer");
-    while let Some(item) = stream.next().await {
-        let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
-        file.write(&chunk)
-            .or(Err(format!("❌  Error while writing to file")))?;
-        let new = min(downloaded + (chunk.len() as u64), total_size);
-        downloaded = new;
-        pb.set_position(new);
-    }
-    let finished_msg = format!("🎉  Finished downloading {}", dropbox_path);
-    pb.finish_with_message(finished_msg);
+    // println!("Commencing transfer");
+    // while let Some(item) = stream.next().await {
+    //     let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
+    //     file.write(&chunk)
+    //         .or(Err(format!("❌  Error while writing to file")))?;
+    //     let new = min(downloaded + (chunk.len() as u64), total_size);
+    //     downloaded = new;
+    //     pb.set_position(new);
+    // }
+    // let finished_msg = format!("🎉  Finished downloading {}", dropbox_path);
+    // pb.finish_with_message(finished_msg);
     Ok(())
 }
 
-const MIN_CHUNK_SIZE: u64 = 5000000;
-const MAX_CHUNK_SIZE: u64 = 5000000000;
-const MAX_CHUNKS: u64 = 10000;
+// const MIN_CHUNK_SIZE: u64 = 5000000;
+// const MAX_CHUNK_SIZE: u64 = 5000000000;
+// const MAX_CHUNKS: u64 = 10000;
 
 async fn upload_to_s3(
     aws_client: &AWSClient,
@@ -489,7 +481,8 @@ async fn upload_to_s3(
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     println!("📂  Uploading to s3://{}/{}", s3_bucket, s3_path);
     println!("📂  Uploading from {}", local_path);
-    let res = aws_client
+    // let res = aws_client
+    aws_client
         .create_multipart_upload()
         .bucket(s3_bucket)
         .key(s3_path)
@@ -497,110 +490,104 @@ async fn upload_to_s3(
         .send()
         .await
         .unwrap();
-    let upload_id = res.upload_id().unwrap();
+    // let upload_id = res.upload_id().unwrap();
 
-    let path = Path::new(local_path);
-    let file_size = tokio::fs::metadata(path)
-        .await
-        .expect("it exists I swear")
-        .len();
+    // let path = Path::new(local_path);
+    // let file_size = tokio::fs::metadata(path)
+    //     .await
+    //     .expect("it exists I swear")
+    //     .len();
 
-    let mut chunk_size = MIN_CHUNK_SIZE;
+    // let mut chunk_size = MIN_CHUNK_SIZE;
 
-    while file_size / chunk_size > MAX_CHUNKS {
-        chunk_size *= 2;
-    }
+    // while file_size / chunk_size > MAX_CHUNKS {
+    //     chunk_size *= 2;
+    // }
 
-    while chunk_size > MAX_CHUNK_SIZE {
-        chunk_size -= 1000;
-    }
+    // while chunk_size > MAX_CHUNK_SIZE {
+    //     chunk_size -= 1000;
+    // }
 
-    let mut chunk_count = (file_size / chunk_size) + 1;
-    let mut size_of_last_chunk = file_size % chunk_size;
-    if size_of_last_chunk == 0 {
-        size_of_last_chunk = chunk_size;
-        chunk_count -= 1;
-    }
+    // let mut chunk_count = (file_size / chunk_size) + 1;
+    // let mut size_of_last_chunk = file_size % chunk_size;
+    // if size_of_last_chunk == 0 {
+    //     size_of_last_chunk = chunk_size;
+    //     chunk_count -= 1;
+    // }
 
-    if file_size == 0 {
-        panic!("Bad file size.");
-    }
-    if chunk_count > MAX_CHUNKS {
-        panic!("Too many chunks! Try increasing your chunk size.")
-    }
+    // if file_size == 0 {
+    //     panic!("Bad file size.");
+    // }
+    // if chunk_count > MAX_CHUNKS {
+    //     panic!("Too many chunks! Try increasing your chunk size.")
+    // }
 
-    let mut upload_parts: Vec<CompletedPart> = Vec::new();
+    // let mut upload_parts: Vec<CompletedPart> = Vec::new();
 
-    println!("⬆️  Uploading {} chunks.", chunk_count);
+    // println!("⬆️  Uploading {} chunks.", chunk_count);
 
-    let pb = ProgressBar::new(file_size);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .unwrap()
-        .progress_chars("█  "));
-    let msg = format!("⬆️  Uploading {} to {}", s3_path, s3_bucket);
-    pb.set_message(msg);
+    // let pb = ProgressBar::new(file_size);
+    // pb.set_style(ProgressStyle::default_bar()
+    //     .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+    //     .unwrap()
+    //     .progress_chars("█  "));
+    // let msg = format!("⬆️  Uploading {} to {}", s3_path, s3_bucket);
+    // pb.set_message(msg);
 
-    for chunk_index in 0..chunk_count {
-        let this_chunk = if chunk_count - 1 == chunk_index {
-            size_of_last_chunk
-        } else {
-            chunk_size
-        };
-        let uploaded = chunk_index * chunk_size;
-        pb.set_message(format!(
-            "⬆️  Uploading chunk {} of {}.",
-            chunk_index + 1,
-            chunk_count
-        ));
-        let stream = ByteStream::read_from()
-            .path(Path::new(local_path))
-            .offset(uploaded)
-            .length(Length::Exact(this_chunk))
-            .build()
-            .await
-            .unwrap();
-        //Chunk index needs to start at 0, but part numbers start at 1.
-        let part_number = (chunk_index as i32) + 1;
-        // snippet-start:[rust.example_code.s3.upload_part]
-        let upload_part_res = aws_client
-            .upload_part()
-            .key(s3_path)
-            .bucket(s3_bucket)
-            .upload_id(upload_id)
-            .body(stream)
-            // .body(stream.to_multipart_s3_stream())
-            .part_number(part_number)
-            .send()
-            .await?;
-        upload_parts.push(
-            CompletedPart::builder()
-                .e_tag(upload_part_res.e_tag.unwrap_or_default())
-                .part_number(part_number)
-                .build(),
-        );
-        pb.set_position(uploaded + this_chunk);
-        // snippet-end:[rust.example_code.s3.upload_part]
-    }
-    pb.finish_with_message("🎉  All chunks uploaded.");
-    // snippet-start:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
-    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
-        .set_parts(Some(upload_parts))
-        .build();
-    // snippet-end:[rust.example_code.s3.upload_part.CompletedMultipartUpload]
-    println!("⏳  Completing upload.");
-    // snippet-start:[rust.example_code.s3.complete_multipart_upload]
-    let _complete_multipart_upload_res = aws_client
-        .complete_multipart_upload()
-        .bucket(s3_bucket)
-        .key(s3_path)
-        .multipart_upload(completed_multipart_upload)
-        .upload_id(upload_id)
-        .send()
-        .await
-        .unwrap();
-    // // snippet-end:[rust.example_code.s3.complete_multipart_upload]
-    println!("✅ Done uploading file.");
+    // for chunk_index in 0..chunk_count {
+    //     let this_chunk = if chunk_count - 1 == chunk_index {
+    //         size_of_last_chunk
+    //     } else {
+    //         chunk_size
+    //     };
+    //     let uploaded = chunk_index * chunk_size;
+    //     pb.set_message(format!(
+    //         "⬆️  Uploading chunk {} of {}.",
+    //         chunk_index + 1,
+    //         chunk_count
+    //     ));
+    //     let stream = ByteStream::read_from()
+    //         .path(Path::new(local_path))
+    //         .offset(uploaded)
+    //         .length(Length::Exact(this_chunk))
+    //         .build()
+    //         .await
+    //         .unwrap();
+    //     //Chunk index needs to start at 0, but part numbers start at 1.
+    //     let part_number = (chunk_index as i32) + 1;
+    //     let upload_part_res = aws_client
+    //         .upload_part()
+    //         .key(s3_path)
+    //         .bucket(s3_bucket)
+    //         .upload_id(upload_id)
+    //         .body(stream)
+    //         // .body(stream.to_multipart_s3_stream())
+    //         .part_number(part_number)
+    //         .send()
+    //         .await?;
+    //     upload_parts.push(
+    //         CompletedPart::builder()
+    //             .e_tag(upload_part_res.e_tag.unwrap_or_default())
+    //             .part_number(part_number)
+    //             .build(),
+    //     );
+    //     pb.set_position(uploaded + this_chunk);
+    // }
+    // pb.finish_with_message("🎉  All chunks uploaded.");
+    // let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+    //     .set_parts(Some(upload_parts))
+    //     .build();
+    // println!("⏳  Completing upload.");
+    // let _complete_multipart_upload_res = aws_client
+    //     .complete_multipart_upload()
+    //     .bucket(s3_bucket)
+    //     .key(s3_path)
+    //     .multipart_upload(completed_multipart_upload)
+    //     .upload_id(upload_id)
+    //     .send()
+    //     .await
+    //     .unwrap();
+    // println!("✅ Done uploading file.");
 
     Ok(())
 }
@@ -610,17 +597,18 @@ async fn migrate_to_s3(
     migrated: &mut i64,
     dropbox_path: &str,
     size: &i64,
+    sqlite_connection: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), std::io::Error> {
     if migrated.is_positive() {
         println!("✅ File already migrated");
         return Ok(());
     }
 
-    let base_name = Path::new(&dropbox_path)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap();
+    // let base_name = Path::new(&dropbox_path)
+    //     .file_name()
+    //     .unwrap()
+    //     .to_str()
+    //     .unwrap();
     let base_folder = env::var("BASE_FOLDER").unwrap();
     let mut base_path = find_and_replace(
         &dropbox_path.clone().to_owned(),
@@ -657,12 +645,11 @@ async fn migrate_to_s3(
             Ok(s3_attrs) => {
                 if s3_attrs.object_size() == db_size {
                     println!("✅ File already migrated");
-                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 1 WHERE path = '{}';",
                         dropbox_path.clone()
                     );
-                    match connection.execute(statement.clone()) {
+                    match sqlite_connection.execute(statement.clone()) {
                         Ok(_) => {
                             println!("📁 File list updated");
                             *migrated = 1;
@@ -676,12 +663,11 @@ async fn migrate_to_s3(
                     return Ok(());
                 } else {
                     println!("❌ File not the same size on S3 as DB");
-                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
                         dropbox_path.clone()
                     );
-                    match connection.execute(statement.clone()) {
+                    match sqlite_connection.execute(statement.clone()) {
                         Ok(_) => {
                             *migrated = 0;
                             println!("📁 File list updated");
@@ -697,12 +683,12 @@ async fn migrate_to_s3(
             Err(err) => match err {
                 AWSError::NoSuchKey(_) => {
                     println!("❌  File not found in S3");
-                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
+
                     let statement = format!(
                         "UPDATE paths SET migrated = 0 WHERE path = '{}';",
                         dropbox_path.clone()
                     );
-                    match connection.execute(statement.clone()) {
+                    match sqlite_connection.execute(statement.clone()) {
                         Ok(_) => {
                             *migrated = 0;
                             println!("📁 File list updated");
@@ -722,14 +708,14 @@ async fn migrate_to_s3(
     }
     match migrated.abs() == 0 {
         true => {
-            let local_path = format!("./temp/{}", base_path);
-            let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
-                .unwrap()
-                .to_string();
-            if !std::path::Path::new(&local_dir).exists() {
-                let _dir = fs::create_dir_all(&local_dir)?;
-            }
-            // println!("📂  Migrating {}", path);
+            let local_path = format!("./temp/{base_path}");
+            // let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
+            //     .unwrap()
+            //     .to_string();
+            // if !std::path::Path::new(&local_dir).exists() {
+            //     let _dir = fs::create_dir_all(&local_dir)?;
+            // }
+            println!("📂  Migrating {base_path}");
             let _file = download_from_db(&dropbox_path, &local_path).await.unwrap();
             // verify file size (refactor from below)
             // TODO verify checksum from DB
@@ -741,13 +727,12 @@ async fn migrate_to_s3(
             {
                 () => {
                     println!("✅ File uploaded to S3");
-                    std::fs::remove_file(&local_path).unwrap();
-                    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
+                    // std::fs::remove_file(&local_path).unwrap();
                     let statement = format!(
                         "UPDATE paths SET migrated = 1 WHERE path = '{}';",
                         dropbox_path.clone()
                     );
-                    match connection.execute(statement.clone()) {
+                    match sqlite_connection.execute(statement.clone()) {
                         Ok(_) => {
                             *migrated = 1;
                             println!("📁 File list updated");
@@ -767,7 +752,9 @@ async fn migrate_to_s3(
     }
 }
 
-async fn perform_migration() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+async fn perform_migration(
+    sqlite_connection: &sqlite::ConnectionWithFullMutex,
+) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     println!("🗃️ Performing migration...");
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
@@ -775,45 +762,54 @@ async fn perform_migration() -> Result<(), Box<(dyn std::error::Error + 'static)
     let config = aws_config::from_env().region(region_provider).load().await;
     let aws_client = AWSClient::new(&config);
     let query = "SELECT * FROM paths WHERE migrated < 1";
-    let sqlite_connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
     let rows = sqlite_connection
         .prepare(query)
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
         .collect::<Vec<_>>();
-    let semaphore = Arc::new(Semaphore::new(1)); // Limit to 10 concurrent downloads
-    let mut tasks = Vec::new();
+    // let semaphore = Arc::new(Semaphore::new(1)); // Limit to 10 concurrent downloads
+    // let mut tasks = Vec::new();
     for row in rows {
         let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
         let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
         let size = row.try_read::<i64, &str>("size").unwrap();
         let aws_client = aws_client.clone();
-        let sem_clone = Arc::clone(&semaphore);
-        let task = tokio::spawn(async move {
-            let permit = sem_clone.acquire().await.unwrap();
-            // sqlite_connection.clone();
-            match migrate_to_s3(&aws_client, &mut migrated, &dropbox_path, &size).await {
-                Ok(_) => {}
-                Err(err) => {
-                    println!("{}", err);
-                }
-            };
-            drop(permit); // Release the semaphore
-        });
-        tasks.push(task);
+        // let sem_clone = Arc::clone(&semaphore);
+        // let task = tokio::spawn(async move {
+        // let permit = sem_clone.acquire().await.unwrap();
+        // sqlite_connection.clone();
+        match migrate_to_s3(
+            &aws_client,
+            &mut migrated,
+            &dropbox_path,
+            &size,
+            &sqlite_connection,
+        )
+        .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                println!("{}", err);
+            }
+        };
+        // drop(permit); // Release the semaphore
+        // });
+        // tasks.push(task);
     }
-    for task in tasks {
-        task.await.unwrap();
-    }
+    // for task in tasks {
+    //     task.await.unwrap();
+    // }
     Ok(())
 }
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
-    check_account().await;
-    get_paths().await;
-    perform_migration().await?;
+    block_on(check_account());
+    let connection = sqlite::Connection::open_with_full_mutex("db.sqlite").unwrap();
+    block_on(get_paths(&connection));
+    perform_migration(&connection).await?;
     println!("✅✅✅  Migration complete");
     Ok(())
 }
