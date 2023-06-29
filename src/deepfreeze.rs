@@ -3,8 +3,86 @@ use crate::dropbox;
 use crate::util;
 
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
-use sedregex::find_and_replace;
 use std::env;
+
+async fn check_migration_status(
+    dropbox_path: &str,
+    size: &i64,
+    base_path: &String,
+    aws_client: &AWSClient,
+    s3_bucket: &String,
+    migrated: &mut i64,
+    sqlite_connection: &sqlite::ConnectionWithFullMutex,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("📂  Checking migration status for {}", dropbox_path);
+    let db_size = size.clone();
+    let s3_attrs = aws::get_s3_attrs(&base_path, &aws_client, &s3_bucket).await;
+
+    Ok(match s3_attrs {
+        Ok(s3_attrs) => {
+            if s3_attrs.object_size() == db_size {
+                println!("✅ File already migrated");
+                let statement = format!(
+                    "UPDATE paths SET migrated = 1 WHERE path = '{}';",
+                    dropbox_path.clone()
+                );
+                match sqlite_connection.execute(statement.clone()) {
+                    Ok(_) => {
+                        println!("📁 File list updated");
+                        *migrated = 1;
+                    }
+                    Err(err) => {
+                        println!("❌  Error in statement: {}", statement);
+                        println!("❌  Database Could not be Updated: {}", statement);
+                        panic!("{}", err);
+                    }
+                }
+                return Ok(());
+            } else {
+                println!("❌ File not the same size on S3 as DB");
+                let statement = format!(
+                    "UPDATE paths SET migrated = 0 WHERE path = '{}';",
+                    dropbox_path.clone()
+                );
+                match sqlite_connection.execute(statement.clone()) {
+                    Ok(_) => {
+                        *migrated = 0;
+                        println!("📁 File list updated");
+                    }
+                    Err(err) => {
+                        println!("❌  Error in statement: {}", statement);
+                        panic!("{}", err);
+                    }
+                }
+                // TODO download_from_db();
+            }
+        }
+        Err(err) => match err {
+            AWSError::NoSuchKey(_) => {
+                println!("❌  File not found in S3");
+
+                let statement = format!(
+                    "UPDATE paths SET migrated = 0 WHERE path = '{}';",
+                    dropbox_path.clone()
+                );
+                match sqlite_connection.execute(statement.clone()) {
+                    Ok(_) => {
+                        *migrated = 0;
+                        println!("📁 File list updated");
+                    }
+                    Err(err) => {
+                        println!("❌  Error in statement: {}", statement);
+                        panic!("{}", err);
+                    }
+                }
+                return Ok(());
+            }
+            _ => {
+                panic!("❌  Error in S3 request: {}", err);
+            }
+        },
+    })
+}
 
 pub async fn migrate_to_s3(
     aws_client: &AWSClient,
@@ -12,96 +90,33 @@ pub async fn migrate_to_s3(
     dropbox_path: &str,
     size: &i64,
     sqlite_connection: &sqlite::ConnectionWithFullMutex,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Box<dyn std::error::Error>> {
     if migrated.is_positive() {
         println!("✅ File already migrated");
         return Ok(());
     }
-    // let base_name = Path::new(&dropbox_path)
-    //     .file_name()
-    //     .unwrap()
-    //     .to_str()
-    //     .unwrap();
-    let base_folder = env::var("BASE_FOLDER").unwrap();
-    let mut base_path = find_and_replace(
-        &dropbox_path.clone().to_owned(),
-        &[format!("s/\\{}\\///g", base_folder)],
-    )
-    .unwrap()
-    .to_string();
-    base_path = util::standardize_path(base_path);
+    let base_path = util::standardize_path(&dropbox_path);
     let s3_bucket = env::var("S3_BUCKET").unwrap();
     if migrated.is_negative() {
-        println!("📂  Checking migration status for {}", dropbox_path);
-        let db_size = size.clone();
-        match aws::get_s3_attrs(&base_path, &aws_client, &s3_bucket).await {
-            Ok(s3_attrs) => {
-                if s3_attrs.object_size() == db_size {
-                    println!("✅ File already migrated");
-                    let statement = format!(
-                        "UPDATE paths SET migrated = 1 WHERE path = '{}';",
-                        dropbox_path.clone()
-                    );
-                    match sqlite_connection.execute(statement.clone()) {
-                        Ok(_) => {
-                            println!("📁 File list updated");
-                            *migrated = 1;
-                        }
-                        Err(err) => {
-                            println!("❌  Error in statement: {}", statement);
-                            println!("❌  Database Could not be Updated: {}", statement);
-                            panic!("{}", err);
-                        }
-                    }
-                    return Ok(());
-                } else {
-                    println!("❌ File not the same size on S3 as DB");
-                    let statement = format!(
-                        "UPDATE paths SET migrated = 0 WHERE path = '{}';",
-                        dropbox_path.clone()
-                    );
-                    match sqlite_connection.execute(statement.clone()) {
-                        Ok(_) => {
-                            *migrated = 0;
-                            println!("📁 File list updated");
-                        }
-                        Err(err) => {
-                            println!("❌  Error in statement: {}", statement);
-                            panic!("{}", err);
-                        }
-                    }
-                    // TODO download_from_db();
-                }
-            }
-            Err(err) => match err {
-                AWSError::NoSuchKey(_) => {
-                    println!("❌  File not found in S3");
-
-                    let statement = format!(
-                        "UPDATE paths SET migrated = 0 WHERE path = '{}';",
-                        dropbox_path.clone()
-                    );
-                    match sqlite_connection.execute(statement.clone()) {
-                        Ok(_) => {
-                            *migrated = 0;
-                            println!("📁 File list updated");
-                        }
-                        Err(err) => {
-                            println!("❌  Error in statement: {}", statement);
-                            panic!("{}", err);
-                        }
-                    }
-                    return Ok(());
-                }
-                _ => {
-                    panic!("❌  Error in S3 request: {}", err);
-                }
-            },
-        }
+        check_migration_status(
+            &dropbox_path,
+            &size,
+            &base_path,
+            &aws_client,
+            &s3_bucket,
+            migrated,
+            &sqlite_connection,
+        )
+        .await?;
     }
     match migrated.abs() == 0 {
         true => {
             let local_path = format!("./temp/{base_path}");
+            // let base_name = Path::new(&dropbox_path)
+            //     .file_name()
+            //     .unwrap()
+            //     .to_str()
+            //     .unwrap();
             // let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
             //     .unwrap()
             //     .to_string();
