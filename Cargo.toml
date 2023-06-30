@@ -13,6 +13,7 @@ aws-smithy-http = "0.55.3"
 dotenv = "0.15.0"
 futures = "0.3.28"
 futures-util = "0.3.28"
+hyper = { version = "0.14.27", features = ["stream"] }
 indicatif = "0.17.5"
 inquire = "0.6.2"
 open = "4.1.0"
