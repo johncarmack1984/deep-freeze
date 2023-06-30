@@ -49,12 +49,83 @@ async fn check_migration_status(
 }
 
 async fn migrate_file_to_s3(
+    row: &sqlite::Row,
     aws_client: &AWSClient,
-    migrated: &mut i64,
-    dropbox_path: &str,
-    size: &i64,
     sqlite_connection: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
+    let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
+    if migrated.is_positive() {
+        println!("✅ Already migrated: {dropbox_path}");
+        return Ok(());
+    }
+    let size = row.try_read::<i64, &str>("size").unwrap();
+    let base_path = util::standardize_path(&dropbox_path);
+    let s3_bucket = env::var("S3_BUCKET").unwrap();
+    if migrated.is_negative() {
+        check_migration_status(
+            &dropbox_path,
+            &size,
+            &base_path,
+            &aws_client,
+            &s3_bucket,
+            &mut migrated,
+            &sqlite_connection,
+        )
+        .await?;
+    }
+    match Confirm::new(&format!(
+        "Migrate DropBox{} to s3:://{}/{}. Proceed?",
+        dropbox_path,
+        env::var("S3_BUCKET").unwrap(),
+        base_path
+    ))
+    .with_default(true)
+    .prompt()
+    {
+        Ok(true) => println!("🚀  Starting migration"),
+        Ok(false) => {
+            println!("🚫  Skipping {dropbox_path}");
+            return Ok(());
+        }
+        Err(err) => {
+            println!("🚫  {err}");
+            std::process::exit(0)
+        }
+    }
+    match migrated.abs() == 0 {
+        true => {
+            println!("📂  Migrating {base_path}");
+            let local_path = format!("./temp/{base_path}");
+            localfs::create_download_folder(&dropbox_path, &local_path);
+            dropbox::download_from_db(&dropbox_path, &local_path).await?;
+            localfs::confirm_local_size(&sqlite_connection, &dropbox_path, &local_path);
+            // TODO verify checksum from DB
+            // TODO create checksum from file for AWS
+            aws::upload_to_s3(&aws_client, &base_path, &local_path, &s3_bucket).await?;
+            aws::confirm_upload_size(
+                &sqlite_connection,
+                &aws_client,
+                &s3_bucket,
+                &dropbox_path,
+                &base_path,
+            )
+            .await?;
+            println!("✅ File uploaded to S3");
+            // TODO verify checksum from S3
+            db::set_migrated(&dropbox_path, &sqlite_connection);
+            // std::fs::remove_file(&local_path).unwrap();
+            Ok(())
+        }
+        false => Ok(()),
+    }
+}
+
+pub async fn perform_migration(
+    sqlite_connection: &sqlite::ConnectionWithFullMutex,
+    aws_client: &AWSClient,
+) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    let rows = db::get_unmigrated_rows(&sqlite_connection);
     match Confirm::new(&format!(
         "This will migrate DropBox folder {} to s3:://{}. Proceed?",
         env::var("BASE_FOLDER").unwrap(),
@@ -73,75 +144,8 @@ async fn migrate_file_to_s3(
             std::process::exit(0)
         }
     }
-    if migrated.is_positive() {
-        println!("✅ File already migrated");
-        return Ok(());
-    }
-    let base_path = util::standardize_path(&dropbox_path);
-    let s3_bucket = env::var("S3_BUCKET").unwrap();
-    if migrated.is_negative() {
-        check_migration_status(
-            &dropbox_path,
-            &size,
-            &base_path,
-            &aws_client,
-            &s3_bucket,
-            migrated,
-            &sqlite_connection,
-        )
-        .await?;
-    }
-    match migrated.abs() == 0 {
-        true => {
-            println!("📂  Migrating {base_path}");
-            let local_path = format!("./temp/{base_path}");
-            localfs::create_download_folder(&dropbox_path, &local_path);
-            dropbox::download_from_db(&dropbox_path, &local_path).await?;
-            // verify file size (refactor from below)
-            // TODO verify checksum from DB
-            // TODO create checksum from file for AWS
-            aws::upload_to_s3(&aws_client, &base_path, &local_path, &s3_bucket).await?;
-            println!("✅ File uploaded to S3");
-            // TODO verify checksum from S3
-            db::set_migrated(&dropbox_path, &sqlite_connection);
-            *migrated = 1;
-            // std::fs::remove_file(&local_path).unwrap();
-            Ok(())
-        }
-        false => Ok(()),
-    }
-}
-
-pub async fn perform_migration(
-    sqlite_connection: &sqlite::ConnectionWithFullMutex,
-    aws_client: &AWSClient,
-) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    match Confirm::new(" Perform migration?")
-        .with_default(true)
-        .prompt()
-    {
-        Ok(true) => println!("🚀 Performing migration"),
-        Ok(false) => {
-            println!("🚫  Migration cancelled");
-            std::process::exit(0);
-        }
-        Err(err) => panic!("🚫  {err}"),
-    }
-    let rows = db::get_unmigrated_rows(&sqlite_connection);
     for row in rows {
-        let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
-        let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
-        let size = row.try_read::<i64, &str>("size").unwrap();
-        let aws_client = aws_client.clone();
-        match migrate_file_to_s3(
-            &aws_client,
-            &mut migrated,
-            &dropbox_path,
-            &size,
-            &sqlite_connection,
-        )
-        .await
-        {
+        match migrate_file_to_s3(&row, &aws_client, &sqlite_connection).await {
             Ok(_) => {}
             Err(err) => {
                 println!("{}", err);
