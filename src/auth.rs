@@ -161,8 +161,8 @@ pub async fn check_account() {
         Some(result) => panic!("❌  {result}"),
         None => (),
     }
-    match current_account.get("email").unwrap().as_str() {
-        Some(email) => println!("👤 Logged in as {email}"),
+    match current_account.get("email") {
+        Some(email) => println!("👤 Logged in as {}", email),
         None => {
             println!("🚫  No account found");
             check_account().await
