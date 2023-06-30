@@ -154,7 +154,10 @@ pub async fn check_account() {
         Some("invalid_access_token/") => {
             println!("🚫  Access token invalid");
             match login().await {
-                Ok(_) => println!("🔑  Logged in"),
+                Ok(_) => {
+                    println!("🔑  Logged in");
+                    check_account().await
+                }
                 Err(err) => panic!("{}", err),
             }
         }
