@@ -101,6 +101,7 @@ async fn list_folder_continue(cursor: &String) -> String {
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
+    println!("");
     let count = db::count_rows(&connection);
     if count == 0 {
         println!("🗄️  File list empty");
@@ -113,8 +114,8 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
     }
     println!("🗃️  {} files in database", count);
     let migrated = db::count_migrated(&connection);
-    match migrated {
-        _ => println!("🎉 {} already migrated", migrated),
+    if migrated > 0 {
+        println!("🎉 {} already migrated", migrated);
     }
     let diff = count - migrated;
     println!("🗃️  {diff} files left to migrate");
@@ -124,7 +125,7 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
         0
     };
     match percent {
-        0 => println!("🗄️  No files migrated"),
+        0 => println!("🤷 {percent}% done"),
         100 => println!("🎉 All files migrated"),
         _ => println!("🎉 {percent}% done!"),
     }

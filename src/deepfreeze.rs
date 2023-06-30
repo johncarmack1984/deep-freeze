@@ -4,9 +4,9 @@ use crate::dropbox;
 use crate::localfs;
 use crate::util;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput as S3Attrs;
-
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use inquire::Confirm;
+use pretty_bytes;
 use std::env;
 
 async fn check_migration_status(
@@ -24,7 +24,7 @@ async fn check_migration_status(
     match s3_attrs {
         Err(err) => match err {
             AWSError::NoSuchKey(_) => {
-                println!("❌  File not found in S3");
+                println!("❌  Not found: s3:://{}/{}", s3_bucket, base_path);
                 db::set_unmigrated(&dropbox_path, &sqlite_connection);
                 *migrated = 0;
             }
@@ -53,6 +53,7 @@ async fn migrate_file_to_s3(
     aws_client: &AWSClient,
     sqlite_connection: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    println!("");
     let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
     let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
     if migrated.is_positive() {
@@ -75,10 +76,8 @@ async fn migrate_file_to_s3(
         .await?;
     }
     match Confirm::new(&format!(
-        "Migrate DropBox{} to s3:://{}/{}. Proceed?",
-        dropbox_path,
-        env::var("S3_BUCKET").unwrap(),
-        base_path
+        "Migrate {base_path} ({}) to S3?",
+        pretty_bytes::converter::convert(size as f64)
     ))
     .with_default(true)
     .prompt()
@@ -127,7 +126,8 @@ pub async fn perform_migration(
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let rows = db::get_unmigrated_rows(&sqlite_connection);
     match Confirm::new(&format!(
-        "This will migrate DropBox folder {} to s3:://{}. Proceed?",
+        "Migrate {} from DropBox{} to s3:://{}?",
+        pretty_bytes::converter::convert(db::get_unmigrated_size(&sqlite_connection) as f64),
         env::var("BASE_FOLDER").unwrap(),
         env::var("S3_BUCKET").unwrap()
     ))
