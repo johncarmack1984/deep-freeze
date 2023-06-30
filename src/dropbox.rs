@@ -1,4 +1,5 @@
 use futures_util::StreamExt;
+use inquire::Confirm;
 use reqwest::header::HeaderMap;
 use std::cmp::min;
 use std::fs::File;
@@ -100,13 +101,13 @@ async fn list_folder_continue(cursor: &String) -> String {
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
-    db::init(&connection);
     let count = db::count_rows(&connection);
     if count == 0 {
         println!("🗄️  File list empty");
+        println!("🗄️  Populating file list...");
         let res = list_folder().await;
         match add_files_to_list(res, &connection).await {
-            Ok(_) => get_paths(&connection).await,
+            Ok(_) => return get_paths(&connection).await,
             Err(err) => panic!("{err}"),
         }
     }
@@ -117,7 +118,11 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
     }
     let diff = count - migrated;
     println!("🗃️  {diff} files left to migrate");
-    let percent = (100 * migrated / count).abs();
+    let percent = if count > 0 {
+        (100 * migrated / count).abs()
+    } else {
+        0
+    };
     match percent {
         0 => println!("🗄️  No files migrated"),
         100 => println!("🎉 All files migrated"),
@@ -126,6 +131,23 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
 }
 
 pub async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Box<dyn Error>> {
+    match Confirm::new(&format!(
+        "Download DropBox/{} to {}?",
+        dropbox_path, local_path
+    ))
+    .with_default(true)
+    .prompt()
+    {
+        Ok(true) => println!("🚀  Starting download"),
+        Ok(false) => {
+            println!("🚫  Download cancelled");
+            std::process::exit(0)
+        }
+        Err(err) => {
+            println!("🚫  {err}");
+            std::process::exit(0)
+        }
+    }
     // // Reqwest setup
     let access_token = env::var("ACCESS_TOKEN")?;
     let team_member_id = env::var("TEAM_MEMBER_ID")?;
@@ -153,16 +175,15 @@ pub async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<()
         &dropbox_path
     ))?;
 
-    println!("⬇️  Checking for saved spot in download {local_path}");
-
     // Indicatif setup
     let pb = ProgressBar::new(total_size);
     pb.set_style(ProgressStyle::default_bar()
         .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .progress_chars("█  "));
-    let msg = format!("⬇️ Downloading {}", dropbox_path);
+    let msg = format!("⬇️  Checking for resumable download {local_path}");
     pb.set_message(msg);
+    pb.set_position(0);
 
     let mut file;
     let mut downloaded: u64 = 0;
@@ -171,7 +192,7 @@ pub async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<()
     if std::path::Path::new(local_path).exists()
         && std::fs::metadata(local_path).unwrap().is_dir() == false
     {
-        println!("⬇️  File exists. Resuming.");
+        pb.set_message("⬇️  File exists. Resuming.");
         file = std::fs::OpenOptions::new()
             .read(true)
             .append(true)
@@ -184,18 +205,18 @@ pub async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<()
     } else if std::path::Path::new(local_path).exists()
         && std::fs::metadata(local_path).unwrap().is_dir() == true
     {
-        println!("⌫  Key exists as directory. Erasing.");
+        pb.set_message("⌫  Key exists as directory. Erasing.");
         std::fs::remove_dir(local_path).unwrap();
-        println!("⬇️  Fresh file.");
+        pb.set_message("⬇️  Fresh file.");
         file = File::create(local_path)
             .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
     } else {
-        println!("⬇️  Fresh file.");
+        pb.set_message("⬇️  Fresh file.");
         file = File::create(local_path)
             .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
     }
+    pb.set_message(format!("⬇️ Downloading {dropbox_path}"));
 
-    println!("Commencing transfer");
     while let Some(item) = stream.next().await {
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
         file.write(&chunk)
@@ -204,7 +225,7 @@ pub async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<()
         downloaded = new;
         pb.set_position(new);
     }
-    let finished_msg = format!("🎉  Finished downloading {}", dropbox_path);
+    let finished_msg = format!("⬇️  Finished downloading {dropbox_path}");
     pb.finish_with_message(finished_msg);
     Ok(())
 }
