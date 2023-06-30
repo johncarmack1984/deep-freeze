@@ -1,3 +1,4 @@
+use crate::json;
 use crate::util::setenv;
 use open;
 use reqwest::header::HeaderMap;
@@ -109,9 +110,7 @@ async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-#[async_recursion::async_recursion(?Send)]
-pub async fn check_account() {
-    println!("🪪  Checking account...");
+async fn get_current_account() -> serde_json::Value {
     let access_token =
         env::var("ACCESS_TOKEN").unwrap_or("❌  Could not find access token.".to_string());
     let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
@@ -134,25 +133,39 @@ pub async fn check_account() {
         .text()
         .await
         .unwrap();
-    let json = serde_json::from_str::<serde_json::Value>(&res).unwrap();
-    match json.get("error_summary").map(|s| s.as_str().unwrap()) {
+    json::from_res(&res)
+}
+
+#[async_recursion::async_recursion(?Send)]
+pub async fn check_account() {
+    println!("🪪  Checking account...");
+    let current_account = get_current_account().await;
+    match current_account
+        .get("error_summary")
+        .map(|s| s.as_str().unwrap())
+    {
         Some("expired_access_token/") => {
-            println!("🔑 Access token expired");
+            println!("🚫  Access token expired");
             match refresh_token().await {
-                Ok(_) => println!("🔑 Refreshed access token"),
-                Err(err) => println!("{}", err),
+                Ok(_) => println!("🔑  Refreshed access token"),
+                Err(err) => panic!("❌  {}", err),
             }
         }
         Some("invalid_access_token/") => {
-            println!("🔑 Access token invalid");
+            println!("🚫  Access token invalid");
             match login().await {
-                Ok(_) => println!("🔑 Logged in"),
-                Err(err) => println!("{}", err),
+                Ok(_) => println!("🔑  Logged in"),
+                Err(err) => panic!("{}", err),
             }
         }
-        Some(result) => println!("{result}"),
+        Some(result) => panic!("❌  {result}"),
+        None => (),
+    }
+    match current_account.get("email").unwrap().as_str() {
+        Some(email) => println!("👤 Logged in as {email}"),
         None => {
-            println!("👤 Logged in as {}", json.get("email").unwrap());
+            println!("🚫  No account found");
+            check_account().await
         }
     }
 }
