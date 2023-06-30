@@ -75,23 +75,23 @@ async fn migrate_file_to_s3(
         )
         .await?;
     }
-    match Confirm::new(&format!(
-        "Migrate {base_path} ({}) to S3?",
-        pretty_bytes::converter::convert(size as f64)
-    ))
-    .with_default(true)
-    .prompt()
-    {
-        Ok(true) => println!("🚀  Starting migration"),
-        Ok(false) => {
-            println!("🚫  Skipping {dropbox_path}");
-            return Ok(());
-        }
-        Err(err) => {
-            println!("🚫  {err}");
-            std::process::exit(0)
-        }
-    }
+    // match Confirm::new(&format!(
+    //     "Migrate {base_path} ({}) to S3?",
+    //     pretty_bytes::converter::convert(size as f64)
+    // ))
+    // .with_default(true)
+    // .prompt()
+    // {
+    //     Ok(true) => println!("🚀  Starting migration"),
+    //     Ok(false) => {
+    //         println!("🚫  Skipping {dropbox_path}");
+    //         return Ok(());
+    //     }
+    //     Err(err) => {
+    //         println!("🚫  {err}");
+    //         std::process::exit(0)
+    //     }
+    // }
     match migrated.abs() == 0 {
         true => {
             println!("📂  Migrating {base_path}");
@@ -113,7 +113,7 @@ async fn migrate_file_to_s3(
             println!("✅ File uploaded to S3");
             // TODO verify checksum from S3
             db::set_migrated(&dropbox_path, &sqlite_connection);
-            // std::fs::remove_file(&local_path).unwrap();
+            std::fs::remove_file(&local_path).unwrap();
             Ok(())
         }
         false => Ok(()),
