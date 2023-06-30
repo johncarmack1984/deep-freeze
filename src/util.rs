@@ -25,21 +25,13 @@ pub fn standardize_path(old_path: &str) -> String {
     )
     .unwrap()
     .to_string();
-    if path.contains("channel") {
-        path = find_and_replace(&path, &["s/channel/Channel/g"])
-            .unwrap()
-            .to_string();
-    }
-    if path.contains("_") {
-        path = find_and_replace(&path, &["s/_/_/g"]).unwrap().to_string();
-    }
-    if path.contains("|") {
-        path = find_and_replace(&path, &["s/\\|/\\|/g"])
-            .unwrap()
-            .to_string();
-    }
-    if path.contains("•") {
-        path = find_and_replace(&path, &["s/•/\\•/g"]).unwrap().to_string();
-    }
+
+    path = find_and_replace(
+        &path,
+        &["s/channel/Channel/g", "s/_/_/g", "s/\\|/\\|/g", "s/•/\\•/g"],
+    )
+    .unwrap()
+    .to_string();
+
     path.to_string()
 }
