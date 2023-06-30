@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use inquire::Confirm;
+// use inquire::Confirm;
 use reqwest::header::HeaderMap;
 use std::cmp::min;
 use std::fs::File;
@@ -132,23 +132,23 @@ pub async fn get_paths(connection: &sqlite::ConnectionWithFullMutex) {
 }
 
 pub async fn download_from_db(dropbox_path: &str, local_path: &str) -> Result<(), Box<dyn Error>> {
-    match Confirm::new(&format!(
-        "Download DropBox/{} to {}?",
-        dropbox_path, local_path
-    ))
-    .with_default(true)
-    .prompt()
-    {
-        Ok(true) => println!("🚀  Starting download"),
-        Ok(false) => {
-            println!("🚫  Download cancelled");
-            std::process::exit(0)
-        }
-        Err(err) => {
-            println!("🚫  {err}");
-            std::process::exit(0)
-        }
-    }
+    // match Confirm::new(&format!(
+    //     "Download DropBox/{} to {}?",
+    //     dropbox_path, local_path
+    // ))
+    // .with_default(true)
+    // .prompt()
+    // {
+    //     Ok(true) => println!("🚀  Starting download"),
+    //     Ok(false) => {
+    //         println!("🚫  Download cancelled");
+    //         std::process::exit(0)
+    //     }
+    //     Err(err) => {
+    //         println!("🚫  {err}");
+    //         std::process::exit(0)
+    //     }
+    // }
     // // Reqwest setup
     let access_token = env::var("ACCESS_TOKEN")?;
     let team_member_id = env::var("TEAM_MEMBER_ID")?;
