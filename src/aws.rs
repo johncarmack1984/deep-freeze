@@ -196,7 +196,7 @@ pub async fn upload_to_s3(
 }
 
 pub async fn confirm_upload_size(
-    connection: &sqlite::ConnectionWithFullMutex,
+    sqlite: &sqlite::ConnectionWithFullMutex,
     aws_client: &AWSClient,
     s3_bucket: &str,
     dropbox_path: &str,
@@ -205,10 +205,12 @@ pub async fn confirm_upload_size(
     let s3_attrs: Result<GetObjectAttributesOutput, AWSError> =
         get_s3_attrs(&base_path, &aws_client, &s3_bucket).await;
     let s3_size = s3_attrs.unwrap().object_size();
-    let dropbox_size = db::get_dropbox_size(&connection, &dropbox_path);
+    let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_path);
     match s3_size == dropbox_size {
-        true => (),
-        false => panic!("🚫  DropBox file size {dropbox_size} does not match S3 {s3_size}"),
+        true => Ok(()),
+        false => {
+            db::set_unmigrated(&dropbox_path, &sqlite);
+            Err(format!("🚫  DropBox file size {dropbox_size} does not match S3 {s3_size}").into())
+        }
     }
-    Ok(())
 }
