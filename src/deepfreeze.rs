@@ -50,9 +50,9 @@ async fn check_migration_status(
 
 async fn migrate_file_to_s3(
     row: &sqlite::Row,
-    http_client: &reqwest::Client,
-    aws_client: &AWSClient,
-    sqlite_connection: &sqlite::ConnectionWithFullMutex,
+    http: &reqwest::Client,
+    aws: &AWSClient,
+    sqlite: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("");
     let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
@@ -69,10 +69,10 @@ async fn migrate_file_to_s3(
             &dropbox_path,
             &size,
             &base_path,
-            &aws_client,
+            &aws,
             &s3_bucket,
             &mut migrated,
-            &sqlite_connection,
+            &sqlite,
         )
         .await?;
     }
@@ -97,24 +97,15 @@ async fn migrate_file_to_s3(
         true => {
             println!("📂  Migrating {base_path}");
             let local_path = format!("./temp/{base_path}");
-            localfs::create_download_folder(&dropbox_path, &local_path);
-            dropbox::download_from_db(&http_client, &dropbox_path, &local_path).await?;
-            localfs::confirm_local_size(&sqlite_connection, &dropbox_path, &local_path);
+            dropbox::download_from_db(&sqlite, &http, &dropbox_path, &local_path).await?;
+            aws::upload_to_s3(&aws, &base_path, &local_path, &s3_bucket).await?;
             // TODO verify checksum from DB
             // TODO create checksum from file for AWS
-            aws::upload_to_s3(&aws_client, &base_path, &local_path, &s3_bucket).await?;
-            aws::confirm_upload_size(
-                &sqlite_connection,
-                &aws_client,
-                &s3_bucket,
-                &dropbox_path,
-                &base_path,
-            )
-            .await?;
+            aws::confirm_upload_size(&sqlite, &aws, &s3_bucket, &dropbox_path, &base_path).await?;
             println!("✅ File uploaded to S3");
             // TODO verify checksum from S3
-            db::set_migrated(&dropbox_path, &sqlite_connection);
-            std::fs::remove_file(&local_path).unwrap();
+            db::set_migrated(&dropbox_path, &sqlite);
+            localfs::delete_local_file(&local_path);
             Ok(())
         }
         false => Ok(()),
