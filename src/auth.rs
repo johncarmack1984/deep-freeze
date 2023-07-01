@@ -15,10 +15,9 @@ async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::
     println!("🚦 Log in to DropBox (if you're not already)");
     println!("🌐 Open this URL in your browser:");
     println!("🌐 {}", url);
-    let _ = open::that(url);
+    open::that(url).unwrap();
     println!("🌐 (one might have opened already)");
     println!("🔐 and authorize the app.");
-
     fn prompt(msg: &str) -> String {
         eprint!("{}: ", msg);
         io::stderr().flush().unwrap();
@@ -26,9 +25,7 @@ async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::
         io::stdin().read_line(&mut input).unwrap();
         input.trim().to_owned()
     }
-
     let authorization_code = prompt("🪪  Paste the authorization code you see here");
-
     println!("🔐 Requesting access token...");
     let mut headers = HeaderMap::new();
     headers.insert(

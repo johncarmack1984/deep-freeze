@@ -116,14 +116,14 @@ pub fn set_migrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
     }
 }
 
-// pub fn set_unmigrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
-//     match connection.execute(format!(
-//         "UPDATE paths SET migrated = 0 WHERE path = '{dropbox_path}';",
-//     )) {
-//         Ok(_) => println!("🪹   Not migrated: {dropbox_path}"),
-//         Err(err) => panic!("❌  {err}"),
-//     }
-// }
+pub fn set_unmigrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
+    match connection.execute(format!(
+        "UPDATE paths SET migrated = 0 WHERE path = '{dropbox_path}';",
+    )) {
+        Ok(_) => println!("🪹   Not migrated: {dropbox_path}"),
+        Err(err) => panic!("❌  {err}"),
+    }
+}
 
 // pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
 //     let query = "SELECT * FROM paths WHERE migrated < 1";
@@ -147,17 +147,17 @@ pub fn get_unmigrated_size(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-// pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_path: &str) -> i64 {
-//     let query = format!(
-//         "SELECT size FROM paths WHERE path = '{dropbox_path}';",
-//         dropbox_path = dropbox_path
-//     );
-//     connection
-//         .prepare(&query)
-//         .unwrap()
-//         .into_iter()
-//         .map(|row| row.unwrap())
-//         .map(|row| row.read::<i64, _>(0))
-//         .next()
-//         .unwrap()
-// }
+pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_path: &str) -> i64 {
+    let query = format!(
+        "SELECT size FROM paths WHERE path = '{dropbox_path}';",
+        dropbox_path = dropbox_path
+    );
+    connection
+        .prepare(&query)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+        .unwrap()
+}

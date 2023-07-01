@@ -1,16 +1,12 @@
-// use aws_smithy_http::http;
-// use futures_util::StreamExt;
-use reqwest::header::HeaderMap;
-// use std::cmp::min;
-// use std::fs::File;
-// use std::io::{Seek, Write};
-// use std::{env, error::Error};
-use std::env;
-// use std::thread;
-// use std::time;
 use crate::db;
 use crate::json;
-// use indicatif::{ProgressBar, ProgressStyle};
+use futures_util::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::header::HeaderMap;
+use std::cmp::min;
+use std::fs::File;
+use std::io::{Seek, Write};
+use std::{env, error::Error};
 
 pub async fn add_files_to_list(
     json: &serde_json::Value,
@@ -110,76 +106,80 @@ pub async fn get_paths(
     db::report_status(&db_connection);
 }
 
-// pub async fn download_from_db(http_client: &reqwest::Client, dropbox_path: &str, local_path: &str) -> Result<(), Box<dyn Error>> {
-//     let access_token = env::var("ACCESS_TOKEN")?;
-//     let team_member_id = env::var("TEAM_MEMBER_ID")?;
-//     let mut headers = HeaderMap::new();
-//     headers.insert(
-//         "Authorization",
-//         format!("Bearer {}", access_token).parse().unwrap(),
-//     );
-//     headers.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
-//     headers.insert(
-//         "Dropbox-API-Arg",
-//         format!("{{\"path\":\"{}\"}}", dropbox_path)
-//             .parse()
-//             .unwrap(),
-//     );
-//     let res = http_client
-//         .post("https://content.dropboxapi.com/2/files/download")
-//         .headers(headers)
-//         .send()
-//         .await?;
-//     let total_size = res.content_length().ok_or(format!(
-//         "Failed to get content length from '{}'",
-//         &dropbox_path
-//     ))?;
-//     let pb = ProgressBar::new(total_size);
-//     pb.set_style(ProgressStyle::default_bar()
-//         .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-//         .unwrap()
-//         .progress_chars("█  "));
-//     let msg = format!("⬇️  Checking for resumable download {local_path}");
-//     pb.set_message(msg);
-//     pb.set_position(0);
-//     let mut file;
-//     let mut downloaded: u64 = 0;
-//     let mut stream = res.bytes_stream();
-//     if std::path::Path::new(local_path).exists()
-//         && std::fs::metadata(local_path).unwrap().is_dir() == false
-//     {
-//         pb.set_message("⬇️  File exists. Resuming.");
-//         file = std::fs::OpenOptions::new()
-//             .read(true)
-//             .append(true)
-//             .open(local_path)
-//             .unwrap();
-//         let file_size = std::fs::metadata(local_path).unwrap().len();
-//         file.seek(std::io::SeekFrom::Start(file_size)).unwrap();
-//         downloaded = file_size;
-//     } else if std::path::Path::new(local_path).exists()
-//         && std::fs::metadata(local_path).unwrap().is_dir() == true
-//     {
-//         pb.set_message("⌫  Key exists as directory. Erasing.");
-//         std::fs::remove_dir(local_path).unwrap();
-//         pb.set_message("⬇️  Fresh file.");
-//         file = File::create(local_path)
-//             .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
-//     } else {
-//         pb.set_message("⬇️  Fresh file.");
-//         file = File::create(local_path)
-//             .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
-//     }
-//     pb.set_message(format!("⬇️ Downloading {dropbox_path}"));
-//     while let Some(item) = stream.next().await {
-//         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
-//         file.write(&chunk)
-//             .or(Err(format!("❌  Error while writing to file")))?;
-//         let new = min(downloaded + (chunk.len() as u64), total_size);
-//         downloaded = new;
-//         pb.set_position(new);
-//     }
-//     let finished_msg = format!("⬇️  Finished downloading {dropbox_path}");
-//     pb.finish_with_message(finished_msg);
-//     Ok(())
-// }
+pub async fn download_from_db(
+    http_client: &reqwest::Client,
+    dropbox_path: &str,
+    local_path: &str,
+) -> Result<(), Box<dyn Error>> {
+    let access_token = env::var("ACCESS_TOKEN")?;
+    let team_member_id = env::var("TEAM_MEMBER_ID")?;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Authorization",
+        format!("Bearer {}", access_token).parse().unwrap(),
+    );
+    headers.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
+    headers.insert(
+        "Dropbox-API-Arg",
+        format!("{{\"path\":\"{}\"}}", dropbox_path)
+            .parse()
+            .unwrap(),
+    );
+    let res = http_client
+        .post("https://content.dropboxapi.com/2/files/download")
+        .headers(headers)
+        .send()
+        .await?;
+    let total_size = res.content_length().ok_or(format!(
+        "Failed to get content length from '{}'",
+        &dropbox_path
+    ))?;
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+        .unwrap()
+        .progress_chars("█  "));
+    let msg = format!("⬇️  Checking for resumable download {local_path}");
+    pb.set_message(msg);
+    pb.set_position(0);
+    let mut file;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+    if std::path::Path::new(local_path).exists()
+        && std::fs::metadata(local_path).unwrap().is_dir() == false
+    {
+        pb.set_message("⬇️  File exists. Resuming.");
+        file = std::fs::OpenOptions::new()
+            .read(true)
+            .append(true)
+            .open(local_path)
+            .unwrap();
+        let file_size = std::fs::metadata(local_path).unwrap().len();
+        file.seek(std::io::SeekFrom::Start(file_size)).unwrap();
+        downloaded = file_size;
+    } else if std::path::Path::new(local_path).exists()
+        && std::fs::metadata(local_path).unwrap().is_dir() == true
+    {
+        pb.set_message("⌫  Key exists as directory. Erasing.");
+        std::fs::remove_dir(local_path).unwrap();
+        pb.set_message("⬇️  Fresh file.");
+        file = File::create(local_path)
+            .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
+    } else {
+        pb.set_message("⬇️  Fresh file.");
+        file = File::create(local_path)
+            .or(Err(format!("❌  Failed to create file '{}'", local_path)))?;
+    }
+    pb.set_message(format!("⬇️ Downloading {dropbox_path}"));
+    while let Some(item) = stream.next().await {
+        let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
+        file.write(&chunk)
+            .or(Err(format!("❌  Error while writing to file")))?;
+        let new = min(downloaded + (chunk.len() as u64), total_size);
+        downloaded = new;
+        pb.set_position(new);
+    }
+    let finished_msg = format!("⬇️  Finished downloading {dropbox_path}");
+    pb.finish_with_message(finished_msg);
+    Ok(())
+}
