@@ -112,7 +112,7 @@ async fn migrate_file_to_s3(
                         .await
                         .unwrap();
                     localfs::delete_local_file(&local_path);
-                    return migrate_file_to_s3(&row, &http, &aws, &sqlite).await;
+                    // return migrate_file_to_s3(&row, &http, &aws, &sqlite).await;
                 }
             }
             println!("✅ File uploaded to S3");
