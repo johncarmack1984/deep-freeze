@@ -1,6 +1,7 @@
 use crate::{db, localfs};
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_s3::config::Region;
+use aws_sdk_s3::operation::delete_object::DeleteObjectOutput;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
@@ -23,14 +24,14 @@ pub async fn new_client() -> AWSClient {
 }
 
 pub async fn get_s3_attrs(
-    base_path: &String,
     client: &AWSClient,
     bucket: &str,
+    key: &String,
 ) -> Result<GetObjectAttributesOutput, AWSError> {
     let res = client
         .get_object_attributes()
         .bucket(bucket)
-        .key(base_path)
+        .key(key)
         .object_attributes(ObjectAttributes::ObjectSize)
         .send()
         .await?;
@@ -181,15 +182,13 @@ pub async fn singlepart_upload(
 
 pub async fn delete_from_s3(
     aws: &AWSClient,
-    s3_path: &str,
-    s3_bucket: &str,
-) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    aws.delete_object()
-        .bucket(s3_bucket)
-        .key(s3_path)
-        .send()
-        .await?;
-    Ok(())
+    bucket: &str,
+    key: &str,
+) -> Result<DeleteObjectOutput, AWSError> {
+    println!("🗑️  Deleting s3://{}/{}", bucket, key);
+    let res = aws.delete_object().bucket(bucket).key(key).send().await?;
+    assert_eq!(res.delete_marker(), true);
+    Ok::<DeleteObjectOutput, AWSError>(res)
 }
 
 pub async fn upload_to_s3(
@@ -210,19 +209,18 @@ pub async fn upload_to_s3(
 
 pub async fn confirm_upload_size(
     sqlite: &sqlite::ConnectionWithFullMutex,
-    aws_client: &AWSClient,
-    s3_bucket: &str,
+    aws: &AWSClient,
+    bucket: &str,
     dropbox_path: &str,
-    base_path: &String,
+    key: &String,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let s3_attrs: Result<GetObjectAttributesOutput, AWSError> =
-        get_s3_attrs(&base_path, &aws_client, &s3_bucket).await;
+        get_s3_attrs(&aws, &bucket, &key).await;
     let s3_size = s3_attrs.unwrap().object_size();
     let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_path);
     match s3_size == dropbox_size {
         true => return Ok(()),
         false => {
-            db::set_unmigrated(&dropbox_path, &sqlite);
             return Err(format!(
                 "DropBox file size {} does not match S3 {}",
                 pretty_bytes::converter::convert(dropbox_size as f64),

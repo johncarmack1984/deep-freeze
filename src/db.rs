@@ -35,10 +35,13 @@ pub fn init(connection: &ConnectionWithFullMutex) {
     match connection.execute(
         "
             CREATE TABLE IF NOT EXISTS paths (
-                path TEXT NOT NULL UNIQUE,
+                dropbox_path TEXT PRIMARY KEY,
                 size INTEGER NOT NULL,
-                hash TEXT NOT NULL,
-                migrated INTEGER NOT NULL DEFAULT -1
+                dropbox_hash TEXT NOT NULL,
+                migrated INTEGER NOT NULL DEFAULT -1,
+                local_path TEXT UNIQUE DEFAULT NULL,
+                s3_key TEXT UNIQUE DEFAULT NULL,
+                s3_hash TEXT UNIQUE DEFAULT NULL
             );
             ",
     ) {
@@ -66,20 +69,25 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .iter()
         .filter(|row| row.get(".tag").unwrap().as_str().unwrap() == "file")
         .map(|row| {
-            let mut path = row
+            let mut dropbox_path = row
                 .clone()
                 .get("path_display")
                 .unwrap()
                 .to_string()
                 .to_owned();
-            path = find_and_replace(&path, &["s/\'//g"]).unwrap().to_string();
+            dropbox_path = find_and_replace(&dropbox_path, &["s/\'//g"])
+                .unwrap()
+                .to_string();
             let hash = row.get("content_hash").unwrap().to_string().to_owned();
             let size = row.get("size").unwrap().to_string().to_owned();
-            return format!("('{}', {}, '{}', -1), ", path, size, hash);
+            return format!("('{}', {}, '{}', -1), ", dropbox_path, size, hash);
         })
         .collect::<Vec<_>>()
         .join("");
-    statement = format!("INSERT OR IGNORE INTO paths VALUES {};", statement);
+    statement = format!(
+        "INSERT OR IGNORE INTO paths (dropbox_path, size, dropbox_hash, migrated) VALUES {};",
+        statement
+    );
     find_and_replace(&statement, &["s/, ;/;/g", "s/\"//g"])
         .unwrap()
         .to_string()
@@ -124,7 +132,7 @@ pub fn count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
 
 pub fn set_migrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
     match connection.execute(format!(
-        "UPDATE paths SET migrated = 1 WHERE path = '{dropbox_path}';",
+        "UPDATE paths SET migrated = 1 WHERE dropbox_path = '{dropbox_path}';",
     )) {
         Ok(_) => println!("🪺  Migrated: {dropbox_path}"),
         Err(err) => panic!("❌  {err}"),
@@ -133,7 +141,7 @@ pub fn set_migrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
 
 pub fn set_unmigrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
     match connection.execute(format!(
-        "UPDATE paths SET migrated = 0 WHERE path = '{dropbox_path}';",
+        "UPDATE paths SET migrated = 0 WHERE dropbox_path = '{dropbox_path}';",
     )) {
         Ok(_) => println!("🪹   Not migrated: {dropbox_path}"),
         Err(err) => panic!("❌  {err}"),
@@ -173,10 +181,7 @@ pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> Strin
 }
 
 pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_path: &str) -> i64 {
-    let query = format!(
-        "SELECT size FROM paths WHERE path = '{dropbox_path}';",
-        dropbox_path = dropbox_path
-    );
+    let query = format!("SELECT size FROM paths WHERE dropbox_path = '{dropbox_path}';");
     connection
         .prepare(&query)
         .unwrap()

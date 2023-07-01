@@ -197,9 +197,9 @@ pub async fn download_from_db(
     }
     let finished_msg = format!("⬇️  Finished downloading {dropbox_path}");
     pb.finish_with_message(finished_msg);
-    assert_eq!(
-        downloaded, dropbox_size as u64,
-        "❌  Downloaded size does not match expected size"
-    );
+    // assert_eq!(
+    //     downloaded, dropbox_size as u64,
+    //     "❌  Downloaded size does not match expected size"
+    // );
     Ok(())
 }

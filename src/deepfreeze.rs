@@ -12,20 +12,19 @@ use std::env;
 async fn check_migration_status(
     dropbox_path: &str,
     dropbox_size: &i64,
-    base_path: &String,
-    aws_client: &AWSClient,
-    s3_bucket: &String,
+    key: &String,
+    aws: &AWSClient,
+    bucket: &String,
     migrated: &mut i64,
-    sqlite_connection: &sqlite::ConnectionWithFullMutex,
+    sqlite: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("📂  Checking migration status for {}", dropbox_path);
-    let s3_attrs: Result<S3Attrs, AWSError> =
-        aws::get_s3_attrs(&base_path, &aws_client, &s3_bucket).await;
+    let s3_attrs: Result<S3Attrs, AWSError> = aws::get_s3_attrs(&aws, &bucket, &key).await;
     match s3_attrs {
         Err(err) => match err {
             AWSError::NoSuchKey(_) => {
-                println!("❌  Not found: s3:://{}/{}", s3_bucket, base_path);
-                db::set_unmigrated(&dropbox_path, &sqlite_connection);
+                println!("❌  Not found: s3:://{}/{}", bucket, key);
+                db::set_unmigrated(&dropbox_path, &sqlite);
                 *migrated = 0;
             }
             _ => panic!("❌  {}", err),
@@ -33,14 +32,14 @@ async fn check_migration_status(
         Ok(s3_attrs) => match s3_attrs.object_size() == dropbox_size.to_owned() {
             true => {
                 println!("✅ Files the same size on DB & S3");
-                db::set_migrated(&dropbox_path, &sqlite_connection);
+                db::set_migrated(&dropbox_path, &sqlite);
                 *migrated = 1;
             }
             false => {
-                println!("❌ File not the same size on S3 as DB");
+                println!("❌ File exists on S3, but is not the correct size");
                 println!("🗳️  DB size: {dropbox_size}");
                 println!("🗂️  S3 size: {}", s3_attrs.object_size());
-                db::set_unmigrated(&dropbox_path, &sqlite_connection);
+                db::set_unmigrated(&dropbox_path, &sqlite);
                 *migrated = 0;
             }
         },
@@ -50,35 +49,38 @@ async fn check_migration_status(
 
 #[async_recursion::async_recursion(?Send)]
 async fn migrate_file_to_s3(
-    row: &sqlite::Row,
+    row: sqlite::Row,
     http: &reqwest::Client,
     aws: &AWSClient,
     sqlite: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("");
     let mut migrated = row.try_read::<i64, &str>("migrated").unwrap();
-    let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
+    let dropbox_path = row
+        .try_read::<&str, &str>("dropbox_path")
+        .unwrap()
+        .to_string();
     if migrated.is_positive() {
         println!("✅ Already migrated: {dropbox_path}");
         return Ok(());
     }
     let size = row.try_read::<i64, &str>("size").unwrap();
-    let base_path = util::standardize_path(&dropbox_path);
-    let s3_bucket = env::var("S3_BUCKET").unwrap();
+    let key = util::standardize_path(&dropbox_path);
+    let bucket = env::var("S3_BUCKET").unwrap();
     if migrated.is_negative() {
         check_migration_status(
             &dropbox_path,
             &size,
-            &base_path,
+            &key,
             &aws,
-            &s3_bucket,
+            &bucket,
             &mut migrated,
             &sqlite,
         )
         .await?;
     }
     // match Confirm::new(&format!(
-    //     "Migrate {base_path} ({}) to S3?",
+    //     "Migrate {key} ({}) to S3?",
     //     pretty_bytes::converter::convert(size as f64)
     // ))
     // .with_default(true)
@@ -96,26 +98,27 @@ async fn migrate_file_to_s3(
     // }
     match migrated.abs() == 0 {
         true => {
-            println!("📂  Migrating {base_path}");
-            let local_path = format!("./temp/{base_path}");
+            println!("📂  Migrating {key}");
+            let local_path = format!("./temp/{key}");
             dropbox::download_from_db(&sqlite, &http, &dropbox_path, &local_path).await?;
-            aws::upload_to_s3(&aws, &base_path, &local_path, &s3_bucket).await?;
+            aws::upload_to_s3(&aws, &key, &local_path, &bucket).await?;
             // TODO verify checksum from DB
             // TODO create checksum from file for AWS
-            match aws::confirm_upload_size(&sqlite, &aws, &s3_bucket, &dropbox_path, &base_path)
-                .await
-            {
+            match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_path, &key).await {
                 Ok(_) => println!("✅ File uploaded to S3"),
                 Err(err) => {
                     println!("🚫  {err}");
-                    aws::delete_from_s3(&aws, &base_path, &s3_bucket)
-                        .await
-                        .unwrap();
-                    // localfs::delete_local_file(&local_path);
+                    db::set_unmigrated(&dropbox_path, &sqlite);
+                    localfs::delete_local_file(&local_path);
+                    match aws::delete_from_s3(&aws, &bucket, &key).await {
+                        // Ok => println!("🗑️  Deleted s3://{}/{}", bucket, base_path),
+                        // Err => println!("🚫  {err}"),
+                        Ok(output) => println!("🗑️  {}", output.delete_marker()),
+                        Err(err) => println!("🚫  {err}"),
+                    };
                     // return migrate_file_to_s3(&row, &http, &aws, &sqlite).await;
                 }
             }
-            println!("✅ File uploaded to S3");
             // TODO verify checksum from S3
             db::set_migrated(&dropbox_path, &sqlite);
             localfs::delete_local_file(&local_path);
@@ -155,11 +158,7 @@ pub async fn perform_migration(
         .into_iter()
         .map(|row| row.unwrap())
     {
-        migrate_file_to_s3(&row, &http, &aws, &sqlite)
-            .await
-            .unwrap();
-        let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
-        db::set_migrated(&dropbox_path, &sqlite);
+        migrate_file_to_s3(row, &http, &aws, &sqlite).await.unwrap();
     }
     println!("");
     println!("✅ Migration complete");
