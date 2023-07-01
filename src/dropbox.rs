@@ -133,10 +133,10 @@ pub async fn download_from_db(
         .headers(headers)
         .send()
         .await?;
-    let total_size = res.content_length().ok_or(format!(
-        "Failed to get content length from '{dropbox_path}'"
-    ))?;
-    let pb = ProgressBar::new(total_size);
+    // let total_size = res.content_length().ok_or(format!(
+    //     "Failed to get content length from '{dropbox_path}'"
+    // ))?;
+    let pb = ProgressBar::new(dropbox_size as u64);
     pb.set_style(ProgressStyle::default_bar()
         .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
@@ -194,14 +194,14 @@ pub async fn download_from_db(
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
         file.write(&chunk)
             .or(Err(format!("❌  Error while writing to file")))?;
-        let new = min(downloaded + (chunk.len() as u64), total_size);
+        let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
         downloaded = new;
         pb.set_position(new);
     }
     let finished_msg = format!("⬇️  Finished downloading {dropbox_path}");
     pb.finish_with_message(finished_msg);
     assert_eq!(
-        downloaded, total_size,
+        downloaded, dropbox_size as u64,
         "❌  Downloaded size does not match expected size"
     );
     Ok(())
