@@ -17,21 +17,21 @@ pub fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-pub fn standardize_path(old_path: &str) -> String {
-    let base_folder = env::var("BASE_FOLDER").unwrap();
-    let mut path = find_and_replace(
-        &old_path.clone().to_owned(),
-        &[format!("s/\\{}\\///g", base_folder)],
-    )
-    .unwrap()
-    .to_string();
+// pub fn standardize_path(old_path: &str) -> String {
+//     let base_folder = env::var("BASE_FOLDER").unwrap();
+//     let mut path = find_and_replace(
+//         &old_path.clone().to_owned(),
+//         &[format!("s/\\{}\\///g", base_folder)],
+//     )
+//     .unwrap()
+//     .to_string();
 
-    path = find_and_replace(
-        &path,
-        &["s/channel/Channel/g", "s/_/_/g", "s/\\|/\\|/g", "s/•/\\•/g"],
-    )
-    .unwrap()
-    .to_string();
+//     path = find_and_replace(
+//         &path,
+//         &["s/channel/Channel/g", "s/_/_/g", "s/\\|/\\|/g", "s/•/\\•/g"],
+//     )
+//     .unwrap()
+//     .to_string();
 
-    path.to_string()
-}
+//     path.to_string()
+// }

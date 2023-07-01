@@ -1,11 +1,12 @@
 use crate::json;
 use crate::util::setenv;
+// use aws_smithy_http::http;
 use open;
 use reqwest::header::HeaderMap;
 use std::env;
 use std::io::{self, Write};
 
-async fn login() -> Result<(), Box<dyn std::error::Error>> {
+async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::Error>> {
     println!("🛑 No account found");
     println!("🔒 Initiating login...");
     let app_key = env::var("APP_KEY").unwrap();
@@ -38,8 +39,7 @@ async fn login() -> Result<(), Box<dyn std::error::Error>> {
         "code={}&grant_type=authorization_code&client_id={}&client_secret={}",
         authorization_code, app_key, app_secret
     );
-    let client = reqwest::Client::new();
-    let res = client
+    let res = http_client
         .post("https://api.dropbox.com/oauth2/token")
         .headers(headers)
         .body(body)
@@ -69,7 +69,7 @@ async fn login() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
+async fn refresh_token(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::Error>> {
     let refresh_token = env::var("REFRESH_TOKEN").unwrap();
     let app_key = env::var("APP_KEY").unwrap();
     let app_secret = env::var("APP_SECRET").unwrap();
@@ -82,8 +82,7 @@ async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
         "refresh_token={}&grant_type=refresh_token&client_id={}&client_secret={}",
         refresh_token, app_key, app_secret
     );
-    let client = reqwest::Client::new();
-    let res = client
+    let res = http_client
         .post("https://api.dropbox.com/oauth2/token")
         .headers(headers)
         .body(body)
@@ -110,7 +109,7 @@ async fn refresh_token() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-async fn get_current_account() -> serde_json::Value {
+async fn get_current_account(http_client: &reqwest::Client) -> serde_json::Value {
     let access_token =
         env::var("ACCESS_TOKEN").unwrap_or("❌  Could not find access token.".to_string());
     let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
@@ -123,8 +122,7 @@ async fn get_current_account() -> serde_json::Value {
         "Dropbox-API-Select-Admin",
         format!("{}", team_member_id).parse().unwrap(),
     );
-    let client = reqwest::Client::new();
-    let res = client
+    let res = http_client
         .post("https://api.dropboxapi.com/2/users/get_current_account")
         .headers(headers)
         .send()
@@ -137,26 +135,26 @@ async fn get_current_account() -> serde_json::Value {
 }
 
 #[async_recursion::async_recursion(?Send)]
-pub async fn check_account() {
+pub async fn check_account(http_client: &reqwest::Client) {
     println!("🪪  Checking account...");
-    let current_account = get_current_account().await;
+    let current_account = get_current_account(&http_client).await;
     match current_account
         .get("error_summary")
         .map(|s| s.as_str().unwrap())
     {
         Some("expired_access_token/") => {
             println!("🚫  Access token expired");
-            match refresh_token().await {
+            match refresh_token(&http_client).await {
                 Ok(_) => println!("🔑  Refreshed access token"),
                 Err(err) => panic!("❌  {}", err),
             }
         }
         Some("invalid_access_token/") => {
             println!("🚫  Access token invalid");
-            match login().await {
+            match login(&http_client).await {
                 Ok(_) => {
                     println!("🔑  Logged in");
-                    check_account().await
+                    check_account(&http_client).await
                 }
                 Err(err) => panic!("{}", err),
             }
@@ -168,7 +166,7 @@ pub async fn check_account() {
         Some(email) => println!("👤 Logged in as {}", email),
         None => {
             println!("🚫  No account found");
-            check_account().await
+            check_account(&http_client).await
         }
     }
 }
