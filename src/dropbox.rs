@@ -39,7 +39,7 @@ async fn list_folder(http: &reqwest::Client) -> String {
     );
     headers.insert("Content-Type", "application/json".parse().unwrap());
     let body = format!(
-        "{{\"path\": \"{}\", \"recursive\": true,  \"limit\": 2000}}",
+        "{{\"path\": \"{}\", \"recursive\": true,  \"limit\": 2000, \"include_non_downloadable_files\": false}}",
         base_folder
     );
     http.post("https://api.dropboxapi.com/2/files/list_folder")
@@ -133,9 +133,6 @@ pub async fn download_from_db(
         .headers(headers)
         .send()
         .await?;
-    // let total_size = res.content_length().ok_or(format!(
-    //     "Failed to get content length from '{dropbox_path}'"
-    // ))?;
     let pb = ProgressBar::new(dropbox_size as u64);
     pb.set_style(ProgressStyle::default_bar()
         .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
