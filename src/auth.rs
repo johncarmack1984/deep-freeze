@@ -113,11 +113,11 @@ async fn get_current_account(http_client: &reqwest::Client) -> serde_json::Value
     let mut headers = HeaderMap::new();
     headers.insert(
         "Authorization",
-        format!("Bearer {}", access_token).parse().unwrap(),
+        format!("Bearer {access_token}").parse().unwrap(),
     );
     headers.insert(
         "Dropbox-API-Select-Admin",
-        format!("{}", team_member_id).parse().unwrap(),
+        format!("{team_member_id}").parse().unwrap(),
     );
     let res = http_client
         .post("https://api.dropboxapi.com/2/users/get_current_account")
@@ -132,38 +132,39 @@ async fn get_current_account(http_client: &reqwest::Client) -> serde_json::Value
 }
 
 #[async_recursion::async_recursion(?Send)]
-pub async fn check_account(http_client: &reqwest::Client) {
+pub async fn check_account(http: &reqwest::Client) {
     println!("🪪  Checking account...");
-    let current_account = get_current_account(&http_client).await;
+    let current_account = get_current_account(&http).await;
     match current_account
         .get("error_summary")
         .map(|s| s.as_str().unwrap())
     {
         Some("expired_access_token/") => {
             println!("🚫  Access token expired");
-            match refresh_token(&http_client).await {
+            match refresh_token(&http).await {
                 Ok(_) => println!("🔑  Refreshed access token"),
-                Err(err) => panic!("❌  {}", err),
+                Err(err) => panic!("❌  {err}"),
             }
         }
         Some("invalid_access_token/") => {
             println!("🚫  Access token invalid");
-            match login(&http_client).await {
+            match login(&http).await {
                 Ok(_) => {
                     println!("🔑  Logged in");
-                    check_account(&http_client).await
+                    check_account(&http).await.try_into().unwrap()
                 }
-                Err(err) => panic!("{}", err),
+                Err(err) => panic!("{err}"),
             }
         }
         Some(result) => panic!("❌  {result}"),
         None => (),
     }
     match current_account.get("email") {
-        Some(email) => println!("👤 Logged in as {}", email),
+        Some(email) => return println!("👤 Logged in as {email}"),
         None => {
             println!("🚫  No account found");
-            check_account(&http_client).await
+            login(&http).await.unwrap()
         }
     }
+    check_account(&http).await.try_into().unwrap()
 }

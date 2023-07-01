@@ -105,7 +105,7 @@ pub async fn get_paths(
             has_more = json::get_has_more(&json);
         }
     }
-    db::report_status(&db_connection);
+    db::report_status(&db_connection).try_into().unwrap()
 }
 
 pub async fn download_from_db(

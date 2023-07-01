@@ -5,8 +5,8 @@ use crate::localfs;
 use crate::util;
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput as S3Attrs;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
-use inquire::Confirm;
-use pretty_bytes;
+// use inquire::Confirm;
+// use pretty_bytes;
 use std::env;
 
 async fn check_migration_status(
@@ -76,23 +76,23 @@ async fn migrate_file_to_s3(
         )
         .await?;
     }
-    match Confirm::new(&format!(
-        "Migrate {base_path} ({}) to S3?",
-        pretty_bytes::converter::convert(size as f64)
-    ))
-    .with_default(true)
-    .prompt()
-    {
-        Ok(true) => println!("🚀  Starting migration"),
-        Ok(false) => {
-            println!("🚫  Skipping {dropbox_path}");
-            return Ok(());
-        }
-        Err(err) => {
-            println!("🚫  {err}");
-            std::process::exit(0)
-        }
-    }
+    // match Confirm::new(&format!(
+    //     "Migrate {base_path} ({}) to S3?",
+    //     pretty_bytes::converter::convert(size as f64)
+    // ))
+    // .with_default(true)
+    // .prompt()
+    // {
+    //     Ok(true) => println!("🚀  Starting migration"),
+    //     Ok(false) => {
+    //         println!("🚫  Skipping {dropbox_path}");
+    //         return Ok(());
+    //     }
+    //     Err(err) => {
+    //         println!("🚫  {err}");
+    //         std::process::exit(0)
+    //     }
+    // }
     match migrated.abs() == 0 {
         true => {
             println!("📂  Migrating {base_path}");
@@ -113,41 +113,42 @@ async fn migrate_file_to_s3(
 }
 
 pub async fn perform_migration(
-    http_client: reqwest::Client,
-    sqlite_connection: sqlite::ConnectionWithFullMutex,
-    aws_client: AWSClient,
+    http: reqwest::Client,
+    sqlite: sqlite::ConnectionWithFullMutex,
+    aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    match Confirm::new(&format!(
-        "Migrate {} from DropBox{} to s3:://{}?",
-        pretty_bytes::converter::convert(db::get_unmigrated_size(&sqlite_connection) as f64),
-        env::var("BASE_FOLDER").unwrap(),
-        env::var("S3_BUCKET").unwrap()
-    ))
-    .with_default(true)
-    .prompt()
-    {
-        Ok(true) => println!("🚀  Starting migration"),
-        Ok(false) => {
-            println!("🚫  Migration cancelled");
-            std::process::exit(0)
-        }
-        Err(err) => {
-            println!("🚫  {err}");
-            std::process::exit(0)
-        }
-    }
-    for row in sqlite_connection
+    // match Confirm::new(&format!(
+    //     "Migrate {} from DropBox{} to s3:://{}?",
+    //     db::get_pretty_unmigrated_size(&sqlite),
+    //     env::var("BASE_FOLDER").unwrap(),
+    //     env::var("S3_BUCKET").unwrap()
+    // ))
+    // .with_default(true)
+    // .prompt()
+    // {
+    //     Ok(true) => println!("🚀  Starting migration"),
+    //     Ok(false) => {
+    //         println!("🚫  Migration cancelled");
+    //         std::process::exit(0)
+    //     }
+    //     Err(err) => {
+    //         println!("🚫  {err}");
+    //         std::process::exit(0)
+    //     }
+    // }
+    for row in sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
     {
-        migrate_file_to_s3(&row, &http_client, &aws_client, &sqlite_connection)
+        migrate_file_to_s3(&row, &http, &aws, &sqlite)
             .await
             .unwrap();
-        // let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
-        // db::set_migrated(&dropbox_path, &sqlite_connection);
+        let dropbox_path = row.try_read::<&str, &str>("path").unwrap().to_string();
+        db::set_migrated(&dropbox_path, &sqlite);
     }
+    println!("");
     println!("✅ Migration complete");
     Ok(())
 }

@@ -17,13 +17,13 @@ use sqlite::ConnectionWithFullMutex as DBConnection;
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("");
     dotenv().ok();
-    let http_client = http::new_client();
-    block_on(auth::check_account(&http_client));
+    let http = http::new_client();
+    block_on(auth::check_account(&http));
     println!("");
-    let db_connection: DBConnection = db::connect();
-    db::init(&db_connection);
-    block_on(dropbox::get_paths(&http_client, &db_connection));
+    let sqlite: DBConnection = db::connect();
+    db::init(&sqlite);
+    block_on(dropbox::get_paths(&http, &sqlite));
     println!("");
-    let aws_client: AWSClient = aws::new_client().await;
-    perform_migration(http_client, db_connection, aws_client).await
+    let aws: AWSClient = aws::new_client().await;
+    perform_migration(http, sqlite, aws).await
 }
