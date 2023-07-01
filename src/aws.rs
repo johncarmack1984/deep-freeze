@@ -223,10 +223,9 @@ pub async fn confirm_upload_size(
         true => return Ok(()),
         false => {
             db::set_unmigrated(&dropbox_path, &sqlite);
-            return Err(format!(
-                "🚫  DropBox file size {dropbox_size} does not match S3 {s3_size}"
-            )
-            .into());
+            return Err(
+                format!("DropBox file size {dropbox_size} does not match S3 {s3_size}").into(),
+            );
         }
     }
 }

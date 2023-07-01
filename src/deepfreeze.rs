@@ -111,6 +111,7 @@ async fn migrate_file_to_s3(
                     aws::delete_from_s3(&aws, &base_path, &s3_bucket)
                         .await
                         .unwrap();
+                    localfs::delete_local_file(&local_path);
                     return migrate_file_to_s3(&row, &http, &aws, &sqlite).await;
                 }
             }
