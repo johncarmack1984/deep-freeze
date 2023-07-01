@@ -179,6 +179,19 @@ pub async fn singlepart_upload(
     Ok(())
 }
 
+pub async fn delete_from_s3(
+    aws: &AWSClient,
+    s3_path: &str,
+    s3_bucket: &str,
+) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    aws.delete_object()
+        .bucket(s3_bucket)
+        .key(s3_path)
+        .send()
+        .await?;
+    Ok(())
+}
+
 pub async fn upload_to_s3(
     aws_client: &AWSClient,
     s3_path: &str,
@@ -207,10 +220,13 @@ pub async fn confirm_upload_size(
     let s3_size = s3_attrs.unwrap().object_size();
     let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_path);
     match s3_size == dropbox_size {
-        true => Ok(()),
+        true => return Ok(()),
         false => {
             db::set_unmigrated(&dropbox_path, &sqlite);
-            Err(format!("🚫  DropBox file size {dropbox_size} does not match S3 {s3_size}").into())
+            return Err(format!(
+                "🚫  DropBox file size {dropbox_size} does not match S3 {s3_size}"
+            )
+            .into());
         }
     }
 }

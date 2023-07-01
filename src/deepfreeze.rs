@@ -48,6 +48,7 @@ async fn check_migration_status(
     Ok(())
 }
 
+#[async_recursion::async_recursion(?Send)]
 async fn migrate_file_to_s3(
     row: &sqlite::Row,
     http: &reqwest::Client,
@@ -101,7 +102,18 @@ async fn migrate_file_to_s3(
             aws::upload_to_s3(&aws, &base_path, &local_path, &s3_bucket).await?;
             // TODO verify checksum from DB
             // TODO create checksum from file for AWS
-            aws::confirm_upload_size(&sqlite, &aws, &s3_bucket, &dropbox_path, &base_path).await?;
+            match aws::confirm_upload_size(&sqlite, &aws, &s3_bucket, &dropbox_path, &base_path)
+                .await
+            {
+                Ok(_) => println!("✅ File uploaded to S3"),
+                Err(err) => {
+                    println!("🚫  {err}");
+                    aws::delete_from_s3(&aws, &base_path, &s3_bucket)
+                        .await
+                        .unwrap();
+                    return migrate_file_to_s3(&row, &http, &aws, &sqlite).await;
+                }
+            }
             println!("✅ File uploaded to S3");
             // TODO verify checksum from S3
             db::set_migrated(&dropbox_path, &sqlite);
