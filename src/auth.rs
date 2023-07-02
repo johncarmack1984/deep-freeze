@@ -15,7 +15,7 @@ async fn login(http: &HTTPClient) -> Result<(), Box<dyn std::error::Error>> {
     println!("🚦 Log in to DropBox (if you're not already)");
     println!("🌐 Open this URL in your browser:");
     println!("🌐 {}", url);
-    open::that(url).unwrap();
+    open::that_detached(url).unwrap();
     println!("🌐 (one might have opened already)");
     println!("🔐 and authorize the app.");
     fn prompt(msg: &str) -> String {
