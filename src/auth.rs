@@ -1,12 +1,12 @@
 use crate::json;
 use crate::util::setenv;
 // use aws_smithy_http::http;
+use crate::http::{self, HTTPClient, HeaderMap};
 use open;
-use reqwest::header::HeaderMap;
 use std::env;
 use std::io::{self, Write};
 
-async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::Error>> {
+async fn login(http: &HTTPClient) -> Result<(), Box<dyn std::error::Error>> {
     println!("🛑 No account found");
     println!("🔒 Initiating login...");
     let app_key = env::var("APP_KEY").unwrap();
@@ -36,7 +36,7 @@ async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::
         "code={}&grant_type=authorization_code&client_id={}&client_secret={}",
         authorization_code, app_key, app_secret
     );
-    let res = http_client
+    let res = http
         .post("https://api.dropbox.com/oauth2/token")
         .headers(headers)
         .body(body)
@@ -44,7 +44,7 @@ async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::
         .await?
         .text()
         .await?;
-    let json = serde_json::from_str::<serde_json::Value>(&res).unwrap();
+    let json = json::from_res(&res);
     assert_eq!(json.get("error"), None, "🛑 Not logged in");
     let refresh_token = json.get("refresh_token").unwrap().to_string().to_owned();
     let access_token = json.get("access_token").unwrap().to_string().to_owned();
@@ -66,20 +66,17 @@ async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::
     Ok(())
 }
 
-async fn refresh_token(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::Error>> {
+async fn refresh_token(http: &HTTPClient) -> Result<(), Box<dyn std::error::Error>> {
     let refresh_token = env::var("REFRESH_TOKEN").unwrap();
     let app_key = env::var("APP_KEY").unwrap();
     let app_secret = env::var("APP_SECRET").unwrap();
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Content-Type",
-        "application/x-www-form-urlencoded".parse().unwrap(),
-    );
+    headers = http::dropbox_content_type_x_www_form_urlencoded_header(&mut headers);
     let body = format!(
         "refresh_token={}&grant_type=refresh_token&client_id={}&client_secret={}",
         refresh_token, app_key, app_secret
     );
-    let res = http_client
+    let res = http
         .post("https://api.dropbox.com/oauth2/token")
         .headers(headers)
         .body(body)
@@ -107,18 +104,9 @@ async fn refresh_token(http_client: &reqwest::Client) -> Result<(), Box<dyn std:
 }
 
 async fn get_current_account(http_client: &reqwest::Client) -> serde_json::Value {
-    let access_token =
-        env::var("ACCESS_TOKEN").unwrap_or("❌  Could not find access token.".to_string());
-    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Authorization",
-        format!("Bearer {access_token}").parse().unwrap(),
-    );
-    headers.insert(
-        "Dropbox-API-Select-Admin",
-        format!("{team_member_id}").parse().unwrap(),
-    );
+    headers = http::dropbox_authorization_header(&mut headers);
+    headers = http::dropbox_select_admin_header(&mut headers);
     let res = http_client
         .post("https://api.dropboxapi.com/2/users/get_current_account")
         .headers(headers)

@@ -1,43 +1,36 @@
-use crate::db;
-use crate::json;
-use crate::localfs::{
-    self, create_download_folder, create_local_file, delete_local_dir, get_local_size,
-    local_file_exists, local_folder_exists, local_path_is_dir,
-};
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
-use reqwest::header::HeaderMap;
 use std::cmp::min;
 use std::io::{Seek, Write};
 use std::{env, error::Error};
 
+use crate::db::{self, DBConnection};
+use crate::http::{self, HTTPClient, HeaderMap};
+use crate::json::{self, JSON};
+use crate::localfs::{
+    self, create_download_folder, create_local_file, delete_local_dir, get_local_size,
+    local_file_exists, local_folder_exists, local_path_is_dir,
+};
+
 pub async fn add_files_to_list(
-    json: &serde_json::Value,
-    db_connection: &sqlite::ConnectionWithFullMutex,
+    json: &JSON,
+    connection: &DBConnection,
 ) -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(json.get("error"), None, "🛑 DropBox returned an error");
     let count: usize = json::count_files(&json);
     println!("🗄️  {count} files found");
     if count > 0 {
-        db::insert_dropbox_paths(&db_connection, json::get_entries(&json));
+        db::insert_dropbox_paths(&connection, json::get_entries(&json));
     }
     Ok(())
 }
 
-async fn list_folder(http: &reqwest::Client) -> String {
-    let access_token = env::var("ACCESS_TOKEN").unwrap();
-    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
+async fn list_folder(http: &HTTPClient) -> String {
     let base_folder = env::var("BASE_FOLDER").unwrap();
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Authorization",
-        format!("Bearer {}", access_token).parse().unwrap(),
-    );
-    headers.insert(
-        "Dropbox-API-Select-Admin",
-        format!("{}", team_member_id).parse().unwrap(),
-    );
-    headers.insert("Content-Type", "application/json".parse().unwrap());
+    headers = http::dropbox_authorization_header(&mut headers);
+    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_content_type_json_header(&mut headers);
     let body = format!(
         "{{\"path\": \"{}\", \"recursive\": true,  \"limit\": 2000, \"include_non_downloadable_files\": false}}",
         base_folder
@@ -53,22 +46,13 @@ async fn list_folder(http: &reqwest::Client) -> String {
         .unwrap()
 }
 
-async fn list_folder_continue(http_client: &reqwest::Client, cursor: &String) -> String {
-    let access_token = env::var("ACCESS_TOKEN").unwrap();
-    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
+async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Authorization",
-        format!("Bearer {}", access_token).parse().unwrap(),
-    );
-    headers.insert("Content-Type", "application/json".parse().unwrap());
-    headers.insert(
-        "Dropbox-API-Select-Admin",
-        format!("{}", team_member_id).parse().unwrap(),
-    );
+    headers = http::dropbox_authorization_header(&mut headers);
+    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_content_type_json_header(&mut headers);
     let body = format!("{{\"cursor\": {cursor}}}");
-    http_client
-        .post("https://api.dropboxapi.com/2/files/list_folder/continue")
+    http.post("https://api.dropboxapi.com/2/files/list_folder/continue")
         .headers(headers)
         .body(body)
         .send()
@@ -80,14 +64,14 @@ async fn list_folder_continue(http_client: &reqwest::Client, cursor: &String) ->
 }
 
 #[async_recursion::async_recursion(?Send)]
-pub async fn get_paths(http: &reqwest::Client, sqlite: &sqlite::ConnectionWithFullMutex) {
+pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
     print!("\n\n🗄️  Getting file list...\n");
     let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");
         println!("🗄️  Populating file list...");
         let mut res = list_folder(&http).await;
-        let mut json: serde_json::Value = json::from_res(&res);
+        let mut json: JSON = json::from_res(&res);
         add_files_to_list(&json, &sqlite).await.unwrap();
         let mut has_more = json::get_has_more(&json);
         let mut cursor: String;
@@ -105,19 +89,14 @@ pub async fn get_paths(http: &reqwest::Client, sqlite: &sqlite::ConnectionWithFu
     db::report_status(&sqlite).try_into().unwrap()
 }
 
-pub async fn get_file_metadata(http: &crate::http::HTTPClient, dropbox_path: &str) -> String {
-    let access_token = env::var("ACCESS_TOKEN").unwrap();
-    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
-    let mut header = HeaderMap::new();
-    header.insert(
-        "Authorization",
-        format!("Bearer {}", access_token).parse().unwrap(),
-    );
-    header.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
-    header.insert("Content-Type", "application/json".parse().unwrap());
+pub async fn get_file_metadata(http: &HTTPClient, dropbox_path: &str) -> String {
+    let mut headers = HeaderMap::new();
+    headers = http::dropbox_authorization_header(&mut headers);
+    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_content_type_json_header(&mut headers);
     let body = format!("{{\"path\": \"{}\"}}", dropbox_path);
     http.post("https://api.dropboxapi.com/2/files/get_metadata")
-        .headers(header)
+        .headers(headers)
         .body(body)
         .send()
         .await
@@ -127,7 +106,7 @@ pub async fn get_file_metadata(http: &crate::http::HTTPClient, dropbox_path: &st
         .unwrap()
 }
 
-pub async fn get_dropbox_size(http: &crate::http::HTTPClient, dropbox_path: &str) -> i64 {
+pub async fn get_dropbox_size(http: &HTTPClient, dropbox_path: &str) -> i64 {
     let res = get_file_metadata(&http, dropbox_path).await;
     let json = json::from_res(&res);
     json::get_size(&json)
@@ -140,14 +119,9 @@ pub async fn download_from_dropbox(
 ) -> Result<(), Box<dyn Error>> {
     let local_size = get_local_size(&local_path);
     let dropbox_size = get_dropbox_size(http, dropbox_path).await;
-    let access_token = env::var("ACCESS_TOKEN")?;
-    let team_member_id = env::var("TEAM_MEMBER_ID")?;
     let mut headers = HeaderMap::new();
-    headers.insert(
-        "Authorization",
-        format!("Bearer {access_token}").parse().unwrap(),
-    );
-    headers.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
+    headers = http::dropbox_authorization_header(&mut headers);
+    headers = http::dropbox_select_admin_header(&mut headers);
     headers.insert(
         "Dropbox-API-Arg",
         format!("{{\"path\":\"{dropbox_path}\"}}").parse().unwrap(),

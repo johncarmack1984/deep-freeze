@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+pub type JSON = serde_json::Value;
+
 pub fn from_res(res: &String) -> Value {
     serde_json::from_str::<Value>(&res).unwrap()
 }

@@ -70,10 +70,7 @@ pub fn init(connection: &ConnectionWithFullMutex) {
     }
 }
 
-pub fn insert_dropbox_paths(
-    connection: &ConnectionWithFullMutex,
-    entries: &Vec<serde_json::Value>,
-) {
+pub fn insert_dropbox_paths(connection: &DBConnection, entries: &Vec<serde_json::Value>) {
     let statement = build_insert_statement(&entries);
     match connection.execute(&statement) {
         Ok(_) => println!("🎉 File list updated"),
