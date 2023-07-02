@@ -203,8 +203,8 @@ pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> Strin
     }
 }
 
-pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_path: &str) -> i64 {
-    let query = format!("SELECT dropbox_size FROM paths WHERE dropbox_path = '{dropbox_path}';");
+pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) -> i64 {
+    let query = format!("SELECT dropbox_size FROM paths WHERE dropbox_id = '{dropbox_id}';");
     connection
         .prepare(&query)
         .unwrap()

@@ -204,12 +204,12 @@ pub async fn confirm_upload_size(
     sqlite: &sqlite::ConnectionWithFullMutex,
     aws: &Client,
     bucket: &str,
-    dropbox_path: &str,
+    dropbox_id: &str,
     key: &String,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let s3_attrs: GetObjectAttributesOutput = get_s3_attrs(&aws, &bucket, &key).await?;
     let s3_size = s3_attrs.object_size();
-    let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_path);
+    let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_id);
     match s3_size == dropbox_size {
         true => return Ok(()),
         false => {

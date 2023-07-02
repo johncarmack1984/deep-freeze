@@ -89,11 +89,11 @@ async fn migrate_file_to_s3(
             aws::upload_to_s3(&aws, &key, &local_path, &bucket).await?;
             // TODO verify checksum from DB
             // TODO create checksum from file for AWS
-            match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_path, &key).await {
+            match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_id, &key).await {
                 Ok(_) => println!("✅ File uploaded to S3"),
                 Err(err) => {
                     println!("🚫  {err}");
-                    db::set_unmigrated(&sqlite, &dropbox_path);
+                    db::set_unmigrated(&sqlite, &dropbox_id);
                     localfs::delete_local_file(&local_path);
                     match aws::delete_from_s3(&aws, &bucket, &key).await {
                         Ok(_) => println!("🗑️  Deleted s3://{bucket}/{key}"),
@@ -102,7 +102,7 @@ async fn migrate_file_to_s3(
                 }
             }
             // TODO verify checksum from S3
-            db::set_migrated(&sqlite, &dropbox_path);
+            db::set_migrated(&sqlite, &dropbox_id);
             Ok(())
         }
         false => Ok(()),

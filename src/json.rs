@@ -3,7 +3,11 @@ use serde_json::Value;
 pub type JSON = serde_json::Value;
 
 pub fn from_res(res: &String) -> Value {
-    serde_json::from_str::<Value>(&res).unwrap()
+    // println!("json::from_res input {:#?}", res);
+    match serde_json::from_str::<Value>(res) {
+        Ok(json) => json,
+        Err(e) => panic!("🔥  Error: {}", e),
+    }
 }
 
 pub fn get_entries(json: &Value) -> &Vec<serde_json::Value> {
@@ -20,7 +24,7 @@ pub fn get_cursor(json: &Value) -> String {
 }
 
 pub fn get_size(json: &Value) -> i64 {
-    // println!("{:#?}", json);
+    // println!("get_size json {:#?}", json);
     json.get("size").unwrap().as_i64().unwrap()
 }
 
@@ -29,7 +33,7 @@ pub fn get_size(json: &Value) -> i64 {
 // }
 
 pub fn _get_id(json: &Value) -> String {
-    json.get("id").unwrap().to_string().to_owned()
+    json.get("id").unwrap().as_str().unwrap().to_string()
 }
 
 // pub fn get_content_hash(json: &Value) -> String {

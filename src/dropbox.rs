@@ -91,7 +91,7 @@ pub async fn get_file_metadata(http: &HTTPClient, dropbox_path: &str) -> String 
     headers = http::dropbox_authorization_header(&mut headers);
     headers = http::dropbox_select_admin_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
-    let body = format!("{{\"path\": \"{}\"}}", dropbox_path);
+    let body = format!("{{\"path\": \"{dropbox_path}\"}}");
     http.post("https://api.dropboxapi.com/2/files/get_metadata")
         .headers(headers)
         .body(body)
@@ -112,7 +112,7 @@ pub async fn get_dropbox_size(http: &HTTPClient, dropbox_path: &str) -> i64 {
 pub async fn download_from_dropbox(
     http: &reqwest::Client,
     dropbox_id: &str,
-    dropbox_path: &str,
+    _dropbox_path: &str,
     local_path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let dropbox_size = get_dropbox_size(http, dropbox_id).await;
@@ -123,31 +123,30 @@ pub async fn download_from_dropbox(
         "Dropbox-API-Arg",
         format!("{{\"path\":\"{dropbox_id}\"}}").parse().unwrap(),
     );
-    // println!("{:#?}", headers);
     let res = http
         .post("https://content.dropboxapi.com/2/files/download")
         .headers(headers)
         .send()
         .await?;
+    let mut file;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
+    file = create_local_file(&local_path);
     let pb = ProgressBar::new(dropbox_size as u64);
     pb.set_style(ProgressStyle::default_bar()
         .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .progress_chars("█  "));
-    let msg = format!("⬇️  Checking for resumable download {local_path}");
-    pb.set_message(msg);
-    pb.set_position(0);
-    let mut file;
-    let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
-    file = create_local_file(&dropbox_path, &local_path);
     pb.set_message(format!("⬇️ Downloading {dropbox_id}"));
+    pb.set_position(0);
     while let Some(item) = stream.next().await {
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
         file.write(&chunk)
             .or(Err(format!("❌  Error while writing to file")))?;
         let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
         downloaded = new;
+        let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
+        pb.set_message(format!("⬇️ ({percent:.2}%) downloaded.", percent = percent,));
         pb.set_position(new);
     }
     let finished_msg = format!("⬇️  Finished downloading {dropbox_id}");
@@ -165,7 +164,9 @@ mod tests {
         let res = crate::dropbox::get_file_metadata(&http, dropbox_path).await;
         let json = crate::json::from_res(&res);
         let size = crate::json::get_size(&json);
-        assert_eq!(size, 22)
+        assert_eq!(size, 22);
+        let id = crate::json::_get_id(&json);
+        assert_eq!(id, "id:FVFwt7Ga8wEAAAAAACwqDA")
     }
 
     #[tokio::test]
@@ -176,18 +177,18 @@ mod tests {
         let http = crate::http::new_client();
         let dropbox_path = format!("{base_folder}/{}", &file_name);
         let local_path: &str = &format!("test/{}", file_name.to_string());
+        if crate::localfs::local_file_exists(&local_path.to_string()) {
+            crate::localfs::delete_local_file(&local_path);
+        }
         let res = crate::dropbox::get_file_metadata(&http, &dropbox_path).await;
         let json = crate::json::from_res(&res);
         let dropbox_size = crate::json::get_size(&json);
         let dropbox_id = crate::json::_get_id(&json);
-        if crate::localfs::local_file_exists(&local_path.to_string()) {
-            crate::localfs::delete_local_file(&local_path);
-        }
         crate::dropbox::download_from_dropbox(&http, &dropbox_id, &dropbox_path, &local_path)
             .await
             .unwrap();
         let local_size = crate::localfs::get_local_size(&local_path);
         assert_eq!(local_size, dropbox_size);
-        std::fs::remove_file(&local_path).unwrap();
+        crate::localfs::delete_local_file(&local_path);
     }
 }
