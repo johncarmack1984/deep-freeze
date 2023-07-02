@@ -80,42 +80,66 @@ async fn list_folder_continue(http_client: &reqwest::Client, cursor: &String) ->
 }
 
 #[async_recursion::async_recursion(?Send)]
-pub async fn get_paths(
-    http_client: &reqwest::Client,
-    db_connection: &sqlite::ConnectionWithFullMutex,
-) {
-    println!("");
-    let count = db::count_rows(&db_connection);
+pub async fn get_paths(http: &reqwest::Client, sqlite: &sqlite::ConnectionWithFullMutex) {
+    print!("\n\n🗄️  Getting file list...\n");
+    let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");
         println!("🗄️  Populating file list...");
-        let mut res = list_folder(&http_client).await;
+        let mut res = list_folder(&http).await;
         let mut json: serde_json::Value = json::from_res(&res);
-        add_files_to_list(&json, &db_connection).await.unwrap();
+        add_files_to_list(&json, &sqlite).await.unwrap();
         let mut has_more = json::get_has_more(&json);
         let mut cursor: String;
         while has_more == true {
             println!("🗄️  has_more is {}", has_more);
             cursor = json::get_cursor(&json);
             println!("🗄️  Getting next page of results...");
-            res = list_folder_continue(&http_client, &cursor).await;
+            res = list_folder_continue(&http, &cursor).await;
             json = json::from_res(&res);
             println!("🗄️  Adding results to database...");
-            add_files_to_list(&json, &db_connection).await.unwrap();
+            add_files_to_list(&json, &sqlite).await.unwrap();
             has_more = json::get_has_more(&json);
         }
     }
-    db::report_status(&db_connection).try_into().unwrap()
+    db::report_status(&sqlite).try_into().unwrap()
 }
 
-pub async fn download_from_db(
-    sqlite: &sqlite::ConnectionWithFullMutex,
+pub async fn get_file_metadata(http: &crate::http::HTTPClient, dropbox_path: &str) -> String {
+    let access_token = env::var("ACCESS_TOKEN").unwrap();
+    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
+    let mut header = HeaderMap::new();
+    header.insert(
+        "Authorization",
+        format!("Bearer {}", access_token).parse().unwrap(),
+    );
+    header.insert("Dropbox-API-Select-Admin", team_member_id.parse().unwrap());
+    header.insert("Content-Type", "application/json".parse().unwrap());
+    let body = format!("{{\"path\": \"{}\"}}", dropbox_path);
+    http.post("https://api.dropboxapi.com/2/files/get_metadata")
+        .headers(header)
+        .body(body)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap()
+}
+
+pub async fn get_dropbox_size(http: &crate::http::HTTPClient, dropbox_path: &str) -> i64 {
+    let res = get_file_metadata(&http, dropbox_path).await;
+    let json = json::from_res(&res);
+    json::get_size(&json)
+}
+
+pub async fn download_from_dropbox(
     http: &reqwest::Client,
     dropbox_path: &str,
     local_path: &str,
 ) -> Result<(), Box<dyn Error>> {
     let local_size = get_local_size(&local_path);
-    let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_path);
+    let dropbox_size = get_dropbox_size(http, dropbox_path).await;
     let access_token = env::var("ACCESS_TOKEN")?;
     let team_member_id = env::var("TEAM_MEMBER_ID")?;
     let mut headers = HeaderMap::new();
@@ -197,9 +221,39 @@ pub async fn download_from_db(
     }
     let finished_msg = format!("⬇️  Finished downloading {dropbox_path}");
     pb.finish_with_message(finished_msg);
-    // assert_eq!(
-    //     downloaded, dropbox_size as u64,
-    //     "❌  Downloaded size does not match expected size"
-    // );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn it_gets_file_metadata_from_dropbox() {
+        dotenv::dotenv().ok();
+        let http = crate::http::new_client();
+        let dropbox_path = "/deep-freeze-test/test-dropbox-download.txt";
+        let res = crate::dropbox::get_file_metadata(&http, dropbox_path).await;
+        let json = crate::json::from_res(&res);
+        let size = crate::json::get_size(&json);
+        assert_eq!(size, 22)
+    }
+
+    #[tokio::test]
+    async fn it_downloads_from_dropbox() {
+        dotenv::dotenv().ok();
+        let base_folder: &str = "/deep-freeze-test";
+        let file_name: &str = "test-dropbox-download.txt";
+        let http = crate::http::new_client();
+        let dropbox_path = format!("{base_folder}/{}", &file_name);
+        let local_path: &str = &format!("test/{}", file_name.to_string());
+        if crate::localfs::local_file_exists(&local_path.to_string()) {
+            crate::localfs::delete_local_file(&local_path);
+        }
+        crate::dropbox::download_from_dropbox(&http, &dropbox_path, &local_path)
+            .await
+            .unwrap();
+        let local_size = crate::localfs::get_local_size(&local_path);
+        let dropbox_size = crate::dropbox::get_dropbox_size(&http, &dropbox_path).await;
+        assert_eq!(local_size, dropbox_size);
+        std::fs::remove_file(&local_path).unwrap();
+    }
 }

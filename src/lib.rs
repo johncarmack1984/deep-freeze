@@ -23,20 +23,6 @@ type CallbackFn = dyn Fn(u64, u64, u64) + Sync + Send + 'static;
 /// A `TrackableBodyStream` can be constructed from a `PathBuf` with the `try_from` implementation
 /// and from a `&[u8]`.
 ///
-/// # Examples
-/// ```
-/// let mut body = TrackableBodyStream::try_from(PathBuf::from("./examples/sample.jpeg"))?;
-/// let bar = ProgressBar::new(body.content_length() as u64);
-///    
-/// body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
-///    bar.inc(cur_buf as u64);
-///    if sent == tot_size {
-///        bar.finish();
-///    }
-///});
-/// // this object can be passed to the put_object method of the AWS SDK for Rust.
-/// let s3_stream = body.to_s3_stream();
-/// ```
 pub struct TrackableBodyStream<I: AsyncReadExt + Unpin> {
     input: I,
     file_size: u64,

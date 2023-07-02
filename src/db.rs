@@ -1,9 +1,12 @@
-// use pretty_bytes::converter::convert;
 use sedregex::find_and_replace;
 use sqlite::{Connection, ConnectionWithFullMutex};
 
-pub fn connect() -> ConnectionWithFullMutex {
-    Connection::open_with_full_mutex("db.sqlite").unwrap()
+pub type DBConnection = ConnectionWithFullMutex;
+
+pub fn connect(dbpath: &str) -> ConnectionWithFullMutex {
+    let sqlite = Connection::open_with_full_mutex(dbpath).unwrap();
+    init(&sqlite);
+    sqlite
 }
 
 pub fn report_status(sqlite: &ConnectionWithFullMutex) {
@@ -36,12 +39,29 @@ pub fn init(connection: &ConnectionWithFullMutex) {
         "
             CREATE TABLE IF NOT EXISTS paths (
                 dropbox_path TEXT PRIMARY KEY,
-                size INTEGER NOT NULL,
+                dropbox_size INTEGER NOT NULL,
                 dropbox_hash TEXT NOT NULL,
                 migrated INTEGER NOT NULL DEFAULT -1,
                 local_path TEXT UNIQUE DEFAULT NULL,
+                local_size INTEGER DEFAULT NULL,
                 s3_key TEXT UNIQUE DEFAULT NULL,
+                s3_size INTEGER DEFAULT NULL,
                 s3_hash TEXT UNIQUE DEFAULT NULL
+            );
+            CREATE TABLE IF NOT EXISTS user (
+                dropbox_user_id TEXT NOT NULL,
+                dropbox_refresh_token TEXT NOT NULL,
+                dropbox_access_token TEXT NOT NULL,
+                dropbox_authorization_code TEXT NOT NULL,
+                aws_access_key_id TEXT NOT NULL,
+                aws_secret_key TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS config (
+                dropbox_app_key TEXT NOT NULL,
+                dropbox_app_secret TEXT NOT NULL,
+                dropbox_base_folder TEXT NOT NULL,
+                s3_bucket TEXT NOT NULL,
+                aws_region TEXT NOT NULL
             );
             ",
     ) {
@@ -58,7 +78,7 @@ pub fn insert_dropbox_paths(
     match connection.execute(&statement) {
         Ok(_) => println!("🎉 File list updated"),
         Err(err) => {
-            println!("❌  Error in statement: {}", statement);
+            println!("❌  Error in statement: {statement}");
             panic!("{}", err);
         }
     }
@@ -78,14 +98,17 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
             dropbox_path = find_and_replace(&dropbox_path, &["s/\'//g"])
                 .unwrap()
                 .to_string();
-            let hash = row.get("content_hash").unwrap().to_string().to_owned();
-            let size = row.get("size").unwrap().to_string().to_owned();
-            return format!("('{}', {}, '{}', -1), ", dropbox_path, size, hash);
+            let dropbox_hash = row.get("content_hash").unwrap().to_string().to_owned();
+            let dropbox_size = row.get("size").unwrap().to_string().to_owned();
+            return format!(
+                "('{}', {}, '{}', -1), ",
+                dropbox_path, dropbox_size, dropbox_hash
+            );
         })
         .collect::<Vec<_>>()
         .join("");
     statement = format!(
-        "INSERT OR IGNORE INTO paths (dropbox_path, size, dropbox_hash, migrated) VALUES {};",
+        "INSERT OR IGNORE INTO paths (dropbox_path, dropbox_size, dropbox_hash, migrated) VALUES {};",
         statement
     );
     find_and_replace(&statement, &["s/, ;/;/g", "s/\"//g"])
@@ -163,7 +186,7 @@ pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> Strin
     if count_unmigrated(connection) == 0 {
         size = 0.0;
     } else {
-        let query = "SELECT SUM(size) FROM paths WHERE migrated < 1";
+        let query = "SELECT SUM(dropbox_size) FROM paths WHERE migrated < 1";
         size = connection
             .prepare(query)
             .unwrap()
@@ -181,7 +204,7 @@ pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> Strin
 }
 
 pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_path: &str) -> i64 {
-    let query = format!("SELECT size FROM paths WHERE dropbox_path = '{dropbox_path}';");
+    let query = format!("SELECT dropbox_size FROM paths WHERE dropbox_path = '{dropbox_path}';");
     connection
         .prepare(&query)
         .unwrap()

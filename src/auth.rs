@@ -60,7 +60,7 @@ async fn login(http_client: &reqwest::Client) -> Result<(), Box<dyn std::error::
         Err(err) => println!("{err}"),
     }
     match setenv("ACCESS_TOKEN", access_token) {
-        Ok(_) => println!("🔑 Access token set"),
+        Ok(_) => println!("🔑 Login: Access token set"),
         Err(err) => println!("{err}"),
     }
     Ok(())
@@ -99,7 +99,7 @@ async fn refresh_token(http_client: &reqwest::Client) -> Result<(), Box<dyn std:
                 "🛑  Access Token Unchanged"
             );
             match setenv("ACCESS_TOKEN", access_token) {
-                Ok(_) => Ok(println!("🔑 Access token set")),
+                Ok(_) => Ok(println!("🔑 Refresh: Access token set")),
                 Err(err) => panic!("{err}"),
             }
         }
@@ -133,8 +133,15 @@ async fn get_current_account(http_client: &reqwest::Client) -> serde_json::Value
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn check_account(http: &reqwest::Client) {
-    println!("🪪  Checking account...");
+    print!("\n🪪  Checking account...\n");
     let current_account = get_current_account(&http).await;
+    match current_account.get("email") {
+        Some(email) => return println!("👤 Logged in as {email}"),
+        None => {
+            println!("🚫  No account found");
+            login(&http).await.unwrap()
+        }
+    }
     match current_account
         .get("error_summary")
         .map(|s| s.as_str().unwrap())
@@ -159,12 +166,4 @@ pub async fn check_account(http: &reqwest::Client) {
         Some(result) => panic!("❌  {result}"),
         None => (),
     }
-    match current_account.get("email") {
-        Some(email) => return println!("👤 Logged in as {email}"),
-        None => {
-            println!("🚫  No account found");
-            login(&http).await.unwrap()
-        }
-    }
-    check_account(&http).await.try_into().unwrap()
 }

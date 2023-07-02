@@ -16,6 +16,10 @@ pub fn get_cursor(json: &Value) -> String {
     json.get("cursor").unwrap().to_string().to_owned()
 }
 
+pub fn get_size(json: &Value) -> i64 {
+    json.get("size").unwrap().as_i64().unwrap()
+}
+
 pub fn count_files(json: &Value) -> usize {
     json.get("entries")
         .unwrap()

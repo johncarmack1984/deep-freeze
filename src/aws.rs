@@ -1,33 +1,38 @@
 use crate::{db, localfs};
 use aws_config::meta::region::RegionProviderChain;
+use aws_config::SdkConfig;
 use aws_sdk_s3::config::Region;
-use aws_sdk_s3::operation::delete_object::DeleteObjectOutput;
+use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
-use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
+use aws_sdk_s3::{Client, Error};
 use aws_smithy_http::byte_stream::{ByteStream, Length};
+use aws_smithy_http::result::SdkError;
 use deep_freeze::TrackableBodyStream;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
+use std::result::Result;
+
+pub type AWSClient = Client;
 
 const MIN_CHUNK_SIZE: u64 = 5242880; // 5 MiB in bytes
 const MAX_CHUNK_SIZE: u64 = 5368709120; // 5 GiB in bytes
 const MAX_UPLOAD_SIZE: u64 = 5497558138880; // 5 TiB in bytes
 const MAX_CHUNKS: u64 = 10000;
 
-pub async fn new_client() -> AWSClient {
+pub async fn new_client() -> Client {
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
-        .or_else("us-east-1");
-    let config = aws_config::from_env().region(region_provider).load().await;
-    AWSClient::new(&config)
+        .or_else(Region::new("us-east-1"));
+    let sdk_config: SdkConfig = aws_config::from_env().region(region_provider).load().await;
+    Client::new(&sdk_config)
 }
 
 pub async fn get_s3_attrs(
-    client: &AWSClient,
+    client: &Client,
     bucket: &str,
     key: &String,
-) -> Result<GetObjectAttributesOutput, AWSError> {
+) -> Result<GetObjectAttributesOutput, Error> {
     let res = client
         .get_object_attributes()
         .bucket(bucket)
@@ -35,20 +40,19 @@ pub async fn get_s3_attrs(
         .object_attributes(ObjectAttributes::ObjectSize)
         .send()
         .await?;
-
-    Ok::<GetObjectAttributesOutput, AWSError>(res)
+    Ok::<GetObjectAttributesOutput, Error>(res)
 }
 
 pub async fn multipart_upload(
-    aws_client: &AWSClient,
-    s3_path: &str,
+    client: &Client,
+    key: &str,
     local_path: &str,
-    s3_bucket: &str,
+    bucket: &str,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    let res = aws_client
+    let res = client
         .create_multipart_upload()
-        .bucket(s3_bucket)
-        .key(s3_path)
+        .bucket(bucket)
+        .key(key)
         .storage_class(StorageClass::DeepArchive)
         .send()
         .await
@@ -84,7 +88,7 @@ pub async fn multipart_upload(
         .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
         .unwrap()
         .progress_chars("█  "));
-    let msg = format!("⬆️  Uploading {} to {}", s3_path, s3_bucket);
+    let msg = format!("⬆️  Uploading {} to {}", key, bucket);
     pb.set_message(msg);
     for chunk_index in 0..chunk_count {
         let this_chunk = if chunk_count - 1 == chunk_index {
@@ -106,10 +110,10 @@ pub async fn multipart_upload(
             .unwrap();
         //Chunk index needs to start at 0, but part numbers start at 1.
         let part_number = (chunk_index as i32) + 1;
-        let upload_part_res = aws_client
+        let upload_part_res = client
             .upload_part()
-            .key(s3_path)
-            .bucket(s3_bucket)
+            .key(key)
+            .bucket(bucket)
             .upload_id(upload_id)
             .body(stream)
             .part_number(part_number)
@@ -128,10 +132,10 @@ pub async fn multipart_upload(
         .set_parts(Some(upload_parts))
         .build();
     println!("⏳  Completing upload.");
-    let _complete_multipart_upload_res = aws_client
+    let _complete_multipart_upload_res = client
         .complete_multipart_upload()
-        .bucket(s3_bucket)
-        .key(s3_path)
+        .bucket(bucket)
+        .key(key)
         .multipart_upload(completed_multipart_upload)
         .upload_id(upload_id)
         .send()
@@ -142,10 +146,10 @@ pub async fn multipart_upload(
 }
 
 pub async fn singlepart_upload(
-    aws_client: &AWSClient,
-    s3_path: &str,
+    client: &Client,
+    key: &str,
     local_path: &str,
-    s3_bucket: &str,
+    bucket: &str,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let mut body = TrackableBodyStream::try_from(PathBuf::from(local_path))
         .map_err(|e| {
@@ -168,11 +172,11 @@ pub async fn singlepart_upload(
             }
     });
 
-    let _upload_res = aws_client
+    let _upload_res = client
         .put_object()
         .storage_class(StorageClass::DeepArchive)
-        .bucket(s3_bucket)
-        .key(s3_path)
+        .bucket(bucket)
+        .key(key)
         .content_length(body.content_length())
         .body(body.to_s3_stream())
         .send()
@@ -180,43 +184,31 @@ pub async fn singlepart_upload(
     Ok(())
 }
 
-pub async fn delete_from_s3(
-    aws: &AWSClient,
-    bucket: &str,
-    key: &str,
-) -> Result<DeleteObjectOutput, AWSError> {
-    println!("🗑️  Deleting s3://{}/{}", bucket, key);
-    let res = aws.delete_object().bucket(bucket).key(key).send().await?;
-    assert_eq!(res.delete_marker(), true);
-    Ok::<DeleteObjectOutput, AWSError>(res)
-}
-
 pub async fn upload_to_s3(
-    aws_client: &AWSClient,
-    s3_path: &str,
+    client: &Client,
+    key: &str,
     local_path: &str,
-    s3_bucket: &str,
+    bucket: &str,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     match localfs::get_local_size(&local_path) {
         0 => panic!("file has no size"),
         size if size >= MAX_UPLOAD_SIZE as i64 => panic!("file is too big"),
         size if size < MAX_CHUNK_SIZE as i64 => {
-            singlepart_upload(&aws_client, &s3_path, &local_path, &s3_bucket).await
+            singlepart_upload(&client, &key, &local_path, &bucket).await
         }
-        _ => multipart_upload(&aws_client, &s3_path, &local_path, &s3_bucket).await,
+        _ => multipart_upload(&client, &key, &local_path, &bucket).await,
     }
 }
 
 pub async fn confirm_upload_size(
     sqlite: &sqlite::ConnectionWithFullMutex,
-    aws: &AWSClient,
+    aws: &Client,
     bucket: &str,
     dropbox_path: &str,
     key: &String,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    let s3_attrs: Result<GetObjectAttributesOutput, AWSError> =
-        get_s3_attrs(&aws, &bucket, &key).await;
-    let s3_size = s3_attrs.unwrap().object_size();
+    let s3_attrs: GetObjectAttributesOutput = get_s3_attrs(&aws, &bucket, &key).await?;
+    let s3_size = s3_attrs.object_size();
     let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_path);
     match s3_size == dropbox_size {
         true => return Ok(()),
@@ -228,5 +220,74 @@ pub async fn confirm_upload_size(
             )
             .into());
         }
+    }
+}
+
+pub async fn delete_from_s3(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+) -> Result<DeleteObjectOutput, SdkError<DeleteObjectError>> {
+    match client.delete_object().bucket(bucket).key(key).send().await {
+        Ok(res) => Ok(res),
+        Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    const BUCKET: &str = "deep-freeze-test";
+
+    #[tokio::test]
+    async fn it_uploads_to_s3() {
+        dotenv::dotenv().ok();
+        let aws = crate::aws::new_client().await;
+        let key = String::from("test-s3-upload.txt");
+        let local_path = String::from(format!("./test/{key}"));
+
+        assert_eq!(
+            true,
+            crate::aws::upload_to_s3(&aws, &key, &local_path, &BUCKET)
+                .await
+                .is_ok(),
+            "🚫  file upload unsuccessful"
+        );
+        assert!(crate::aws::delete_from_s3(&aws, &BUCKET, &key)
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_gets_s3_attrs() {
+        dotenv::dotenv().ok();
+        let aws = crate::aws::new_client().await;
+        let key = String::from("test-s3-get-attrs.txt");
+        let local_path = String::from(format!("./test/{key}"));
+        let local_size = crate::localfs::get_local_size(&local_path);
+        crate::aws::upload_to_s3(&aws, &key, &local_path, &BUCKET)
+            .await
+            .unwrap();
+        let attrs = crate::aws::get_s3_attrs(&aws, &BUCKET, &key).await.unwrap();
+        assert_eq!(attrs.object_size(), local_size, "🚫  sizes don't match");
+        assert!(crate::aws::delete_from_s3(&aws, &BUCKET, &key)
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_deletes_from_s3() {
+        let aws = crate::aws::new_client().await;
+        let key = String::from("test-s3-delete.txt");
+        let local_path = String::from(format!("./test/{key}"));
+        crate::aws::upload_to_s3(&aws, &key, &local_path, &BUCKET)
+            .await
+            .unwrap();
+        assert_eq!(
+            true,
+            crate::aws::delete_from_s3(&aws, "deep-freeze-test", "test-s3-delete.txt")
+                .await
+                .is_ok(),
+            "🚫  file deletion unsuccessful",
+        );
     }
 }
