@@ -125,7 +125,6 @@ impl<I: AsyncReadExt + Unpin> Stream for TrackableBodyStream<I> {
                     return Poll::Ready(None);
                 }
                 mut_self.cur_read += read_op as u64;
-                //buf.resize(read_op, 0u8);
                 if mut_self.callback.is_some() {
                     mut_self.callback.as_ref().unwrap()(
                         mut_self.file_size,

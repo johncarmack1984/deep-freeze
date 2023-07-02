@@ -1,7 +1,6 @@
+use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json::{self, JSON};
 use crate::util::setenv;
-// use aws_smithy_http::http;
-use crate::http::{self, HTTPClient, HeaderMap};
 use open;
 use std::env;
 use std::io::{self, Write};

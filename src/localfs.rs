@@ -1,4 +1,3 @@
-// use sedregex::find_and_replace;
 use std::{fs::File, path::Path};
 
 pub fn local_file_exists(local_path: &str) -> bool {
@@ -6,13 +5,7 @@ pub fn local_file_exists(local_path: &str) -> bool {
     path.exists()
 }
 
-// pub fn local_folder_exists(local_path: &str) -> bool {
-//     let path = Path::new(local_path);
-//     path.is_dir()
-// }
-
 pub fn create_local_file(local_path: &str) -> File {
-    println!("create_local_file");
     create_download_folder(&local_path);
     match File::create(&local_path) {
         Ok(file) => file,
