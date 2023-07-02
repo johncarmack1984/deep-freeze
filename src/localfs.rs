@@ -9,33 +9,28 @@ pub fn local_file_exists(local_path: &str) -> bool {
     path.exists()
 }
 
-pub fn local_path_is_dir(local_path: &str) -> bool {
-    std::fs::metadata(local_path).unwrap().is_dir()
-}
-
 pub fn local_folder_exists(local_path: &str) -> bool {
     let path = Path::new(local_path);
     path.is_dir()
 }
 
-pub fn create_local_file(local_path: &str) -> File {
-    File::create(local_path)
-        .or(Err(format!("❌  Failed to create file '{local_path}'")))
-        .unwrap()
+pub fn create_local_file(dropbox_path: &str, local_path: &str) -> File {
+    create_download_folder(dropbox_path, local_path);
+    match File::create(&local_path) {
+        Ok(file) => file,
+        Err(e) => panic!("❌  Failed to create file '{}': {}", local_path, e),
+    }
 }
 
 pub fn create_download_folder(dropbox_path: &str, local_path: &str) -> () {
-    let base_name = Path::new(&dropbox_path)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap();
-    let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", base_name)])
+    let local_dir = find_and_replace(&local_path, &[format!("s/{}//g", dropbox_path)])
         .unwrap()
         .to_string();
+    println!("local_dir: {}", local_dir);
     if !local_folder_exists(&local_dir) {
         fs::create_dir_all(&local_dir).unwrap()
     }
+    // }
 }
 
 pub fn get_local_size(local_path: &str) -> i64 {
@@ -48,16 +43,6 @@ pub fn get_local_size(local_path: &str) -> i64 {
     file_size.try_into().unwrap()
 }
 
-// pub fn get_local_checksum(local_path: &str) -> String {
-//     let path = Path::new(local_path);
-//     let file_size = std::fs::metadata(path).expect("it exists I swear").len();
-//     file_size.try_into().unwrap()
-// }
-
 pub fn delete_local_file(local_path: &str) -> () {
     std::fs::remove_file(&local_path).unwrap();
-}
-
-pub fn delete_local_dir(local_path: &str) -> () {
-    std::fs::remove_dir(&local_path).unwrap()
 }

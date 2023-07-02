@@ -1,4 +1,4 @@
-use crate::json;
+use crate::json::{self, JSON};
 use crate::util::setenv;
 // use aws_smithy_http::http;
 use crate::http::{self, HTTPClient, HeaderMap};
@@ -84,7 +84,7 @@ async fn refresh_token(http: &HTTPClient) -> Result<(), Box<dyn std::error::Erro
         .await?
         .text()
         .await?;
-    let json = serde_json::from_str::<serde_json::Value>(&res).unwrap();
+    let json = json::from_res(&res);
     match json.get("error_summary").map(|s| s.as_str().unwrap()) {
         Some(result) => panic!("🛑 {result}"),
         None => {
@@ -103,10 +103,18 @@ async fn refresh_token(http: &HTTPClient) -> Result<(), Box<dyn std::error::Erro
     }
 }
 
-async fn get_current_account(http_client: &reqwest::Client) -> serde_json::Value {
+async fn get_current_account(http_client: &HTTPClient) -> JSON {
     let mut headers = HeaderMap::new();
-    headers = http::dropbox_authorization_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
+    let access_token = env::var("ACCESS_TOKEN").unwrap();
+    headers.insert(
+        "Authorization",
+        format!("Bearer {}", access_token).parse().unwrap(),
+    );
+    let team_member_id = env::var("TEAM_MEMBER_ID").unwrap();
+    headers.insert(
+        "Dropbox-API-Select-Admin",
+        format!("{}", team_member_id).parse().unwrap(),
+    );
     let res = http_client
         .post("https://api.dropboxapi.com/2/users/get_current_account")
         .headers(headers)

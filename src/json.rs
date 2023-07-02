@@ -7,6 +7,7 @@ pub fn from_res(res: &String) -> Value {
 }
 
 pub fn get_entries(json: &Value) -> &Vec<serde_json::Value> {
+    // println!("{:#?}", json);
     json.get("entries").unwrap().as_array().unwrap()
 }
 
@@ -19,8 +20,29 @@ pub fn get_cursor(json: &Value) -> String {
 }
 
 pub fn get_size(json: &Value) -> i64 {
+    // println!("{:#?}", json);
     json.get("size").unwrap().as_i64().unwrap()
 }
+
+// pub fn get_name(json: &Value) -> String {
+//     json.get("name").unwrap().to_string().to_owned()
+// }
+
+pub fn _get_id(json: &Value) -> String {
+    json.get("id").unwrap().to_string().to_owned()
+}
+
+// pub fn get_content_hash(json: &Value) -> String {
+//     json.get("content_hash").unwrap().to_string().to_owned()
+// }
+
+// pub fn get_path_display(json: &Value) -> String {
+//     json.get("path_display").unwrap().to_string().to_owned()
+// }
+
+// pub fn get_path_lower(json: &Value) -> String {
+//     json.get("path_lower").unwrap().to_string().to_owned()
+// }
 
 pub fn count_files(json: &Value) -> usize {
     json.get("entries")

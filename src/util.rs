@@ -17,6 +17,32 @@ pub fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
+// pub fn escape_path(path: &str) -> String {
+//     let mut path = path.to_string();
+//     path = find_and_replace(
+//         &path,
+//         &[
+//             "s/\\//\\\\\\//g",
+//             "s/\\./\\\\\\./g",
+//             "s/\\(/\\\\(/g",
+//             "s/\\)/\\\\)/g",
+//             "s/\\[/\\\\[/g",
+//             "s/\\]/\\\\]/g",
+//             "s/\\$/\\\\$/g",
+//             "s/\\^/\\\\^/g",
+//             "s/\\*/\\\\*/g",
+//             "s/\\+/\\\\+/g",
+//             "s/\\?/\\\\?/g",
+//             "s/\\|/\\\\|/g",
+//             "s/\\{/\\\\{/g",
+//             "s/\\}/\\\\}/g",
+//         ],
+//     )
+//     .unwrap()
+//     .to_string();
+//     path
+// }
+
 pub fn standardize_path(old_path: &str) -> String {
     let base_folder = env::var("BASE_FOLDER").unwrap();
     let mut path = find_and_replace(

@@ -1,10 +1,11 @@
 use sedregex::find_and_replace;
-use sqlite::{Connection, ConnectionWithFullMutex};
+use sqlite::{self, ConnectionWithFullMutex};
 
 pub type DBConnection = ConnectionWithFullMutex;
+pub type DBRow = sqlite::Row;
 
 pub fn connect(dbpath: &str) -> ConnectionWithFullMutex {
-    let sqlite = Connection::open_with_full_mutex(dbpath).unwrap();
+    let sqlite = sqlite::Connection::open_with_full_mutex(dbpath).unwrap();
     init(&sqlite);
     sqlite
 }
@@ -38,7 +39,8 @@ pub fn init(connection: &ConnectionWithFullMutex) {
     match connection.execute(
         "
             CREATE TABLE IF NOT EXISTS paths (
-                dropbox_path TEXT PRIMARY KEY,
+                dropbox_id TEXT PRIMARY KEY,
+                dropbox_path TEXT NOT NULL,
                 dropbox_size INTEGER NOT NULL,
                 dropbox_hash TEXT NOT NULL,
                 migrated INTEGER NOT NULL DEFAULT -1,
@@ -92,20 +94,21 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
                 .unwrap()
                 .to_string()
                 .to_owned();
-            dropbox_path = find_and_replace(&dropbox_path, &["s/\'//g"])
+            dropbox_path = find_and_replace(&dropbox_path, &["s/\'/\'\'/g"])
                 .unwrap()
                 .to_string();
+            let dropbox_id = row.get("id").unwrap().to_string().to_owned();
             let dropbox_hash = row.get("content_hash").unwrap().to_string().to_owned();
             let dropbox_size = row.get("size").unwrap().to_string().to_owned();
             return format!(
-                "('{}', {}, '{}', -1), ",
-                dropbox_path, dropbox_size, dropbox_hash
+                "('{}', '{}', {}, '{}', -1), ",
+                dropbox_id, dropbox_path, dropbox_size, dropbox_hash
             );
         })
         .collect::<Vec<_>>()
         .join("");
     statement = format!(
-        "INSERT OR IGNORE INTO paths (dropbox_path, dropbox_size, dropbox_hash, migrated) VALUES {};",
+        "INSERT OR IGNORE INTO paths (dropbox_id, dropbox_path, dropbox_size, dropbox_hash, migrated) VALUES {};",
         statement
     );
     find_and_replace(&statement, &["s/, ;/;/g", "s/\"//g"])
@@ -150,20 +153,20 @@ pub fn count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn set_migrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
+pub fn set_migrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     match connection.execute(format!(
-        "UPDATE paths SET migrated = 1 WHERE dropbox_path = '{dropbox_path}';",
+        "UPDATE paths SET migrated = 1 WHERE dropbox_id = '{dropbox_id}';",
     )) {
-        Ok(_) => println!("🪺  Migrated: {dropbox_path}"),
+        Ok(_) => println!("🪺  Migrated: {dropbox_id}"),
         Err(err) => panic!("❌  {err}"),
     }
 }
 
-pub fn set_unmigrated(dropbox_path: &str, connection: &ConnectionWithFullMutex) {
+pub fn set_unmigrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     match connection.execute(format!(
-        "UPDATE paths SET migrated = 0 WHERE dropbox_path = '{dropbox_path}';",
+        "UPDATE paths SET migrated = 0 WHERE dropbox_id = '{dropbox_id}';",
     )) {
-        Ok(_) => println!("🪹   Not migrated: {dropbox_path}"),
+        Ok(_) => println!("🪹   Not migrated: {dropbox_id}"),
         Err(err) => panic!("❌  {err}"),
     }
 }

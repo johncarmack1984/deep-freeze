@@ -229,7 +229,10 @@ pub async fn delete_from_s3(
     key: &str,
 ) -> Result<DeleteObjectOutput, SdkError<DeleteObjectError>> {
     match client.delete_object().bucket(bucket).key(key).send().await {
-        Ok(res) => Ok(res),
+        Ok(res) => {
+            println!("🗑️  Deleted s3://{}/{}", bucket, key);
+            Ok(res)
+        }
         Err(err) => Err(err),
     }
 }
