@@ -113,6 +113,7 @@ pub async fn download_from_dropbox(
     dropbox_id: &str,
     _dropbox_path: &str,
     local_path: &str,
+    m: &&crate::progress::MultiProgress,
 ) -> Result<(), Box<dyn Error>> {
     let dropbox_size = get_dropbox_size(http, dropbox_id).await;
     let mut headers = HeaderMap::new();
@@ -130,21 +131,22 @@ pub async fn download_from_dropbox(
     let mut stream = res.bytes_stream();
     let mut file;
     let mut downloaded: u64 = 0;
-    // let pb = crate::progress::new(dropbox_size as u64);
+    let pb = m.add(crate::progress::new(dropbox_size as u64, "file_transfer"));
     file = create_local_file(&local_path);
-    // pb.set_message(format!("⬇️ Downloading {dropbox_id}"));
+    pb.set_message(format!("⬇️ Downloading {dropbox_id}"));
     while let Some(item) = stream.next().await {
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
         let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
         downloaded = new;
-        // let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
-        // pb.set_position(downloaded);
-        // pb.set_message(format!("⬇️ ({percent:.2}%) downloaded.", percent = percent,));
+        let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
+        pb.set_position(downloaded);
+        pb.set_message(format!("⬇️ ({percent:.2}%) downloaded.", percent = percent,));
         file.write(&chunk)
             .or(Err(format!("❌  Error while writing to file")))?;
     }
-    // let finished_msg = format!("⬇️  Finished downloading {dropbox_id}");
-    // pb.finish_with_message(finished_msg);
+    let finished_msg = format!("⬇️  Finished downloading {dropbox_id}");
+    pb.finish_with_message(finished_msg);
+    // pb.finish_and_clear();
     Ok(())
 }
 
@@ -153,6 +155,7 @@ mod tests {
     #[tokio::test]
     async fn it_gets_file_metadata_from_dropbox() {
         dotenv::dotenv().ok();
+        ::std::env::set_var("SILENT", "true");
         let http = crate::http::new_client();
         let dropbox_path = "/deep-freeze-test/test-dropbox-download.txt";
         let res = crate::dropbox::get_file_metadata(&http, dropbox_path).await;
@@ -179,9 +182,15 @@ mod tests {
         let json = crate::json::from_res(&res);
         let dropbox_size = crate::json::get_size(&json);
         let dropbox_id = crate::json::_get_id(&json);
-        crate::dropbox::download_from_dropbox(&http, &dropbox_id, &dropbox_path, &local_path)
-            .await
-            .unwrap();
+        crate::dropbox::download_from_dropbox(
+            &http,
+            &dropbox_id,
+            &dropbox_path,
+            &local_path,
+            &&crate::progress::new_multi_progress(),
+        )
+        .await
+        .unwrap();
         let local_size = crate::localfs::get_local_size(&local_path);
         assert_eq!(local_size, dropbox_size);
         crate::localfs::delete_local_file(&local_path);
