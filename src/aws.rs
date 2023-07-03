@@ -4,16 +4,13 @@ use aws_config::SdkConfig;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
-use aws_sdk_s3::types::{
-    CompletedMultipartUpload, CompletedPart, Object, ObjectAttributes, StorageClass,
-};
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client, Error};
 use aws_smithy_http::byte_stream::{ByteStream, Length};
 use aws_smithy_http::result::SdkError;
 use deep_freeze::{
     TrackableBodyStream, MAX_CHUNKS, MAX_CHUNK_SIZE, MAX_UPLOAD_SIZE, MIN_CHUNK_SIZE,
 };
-use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
@@ -246,7 +243,7 @@ pub async fn _empty_test_bucket() {
     while objects.len() > 0 {
         for object in objects {
             let key = object.key.unwrap();
-            delete_from_s3(&aws, &bucket, &key).await;
+            delete_from_s3(&aws, &bucket, &key).await.unwrap();
         }
         objects = aws
             .list_objects_v2()

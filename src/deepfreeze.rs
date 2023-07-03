@@ -48,7 +48,7 @@ async fn check_migration_status(
                 println!("❌ File exists on S3, but is not the correct size");
                 println!("🗳️  DB size: {dropbox_size}");
                 println!("🗂️  S3 size: {}", s3_attrs.object_size());
-                aws::delete_from_s3(&aws, &bucket, &key).await;
+                aws::delete_from_s3(&aws, &bucket, &key).await.unwrap();
                 db::set_unmigrated(&sqlite, &dropbox_id);
                 0
             }
