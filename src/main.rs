@@ -64,7 +64,11 @@ async fn main() {
     pb.inc(1);
     auth::check_account(&http).await;
     pb.inc(1);
-    let sqlite: DBConnection = db::connect(std::env::var("DBFILE").unwrap().as_str());
+    let sqlite: DBConnection = db::connect(
+        std::env::var("DBFILE")
+            .unwrap_or("db.sqlite".to_string())
+            .as_str(),
+    );
     pb.inc(1);
     dropbox::get_paths(&http, &sqlite).await;
     pb.inc(1);
