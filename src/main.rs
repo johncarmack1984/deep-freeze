@@ -24,30 +24,23 @@ struct Args {
     /// Path to the sqlite database file
     #[arg(short, long, default_value = "db.sqlite")]
     dbfile: String,
-
     /// Run the program end-to-end with test values
     #[arg(short, long, default_value = "false")]
     e2e: bool,
-
     /// Reset the database and temp files
     #[arg(short, long, default_value = "false")]
     reset: bool,
-
     /// Reset the database and temp files, then exit
-    /// (implies --reset)
     #[arg(short = 'R', long, default_value = "false")]
     reset_only: bool,
-
     /// Run in silent mode
     #[arg(short, long, default_value = "false")]
     silent: bool,
-
     /// Skip these paths
     /// (comma-separated)
     /// (e.g. --skip "path1,path2")
-    #[arg(short = 'k', long, default_value = "")]
+    #[arg(short = 'k', long)]
     skip: Vec<String>,
-
     /// Path to the temp directory
     #[arg(short, long, default_value = "temp")]
     temp_dir: String,

@@ -48,10 +48,10 @@ pub fn reset() {
 pub fn _create_test_file(key: &str, bytes: u64) -> File {
     use rand::{distributions::Alphanumeric, thread_rng, Rng};
     let mut file = create_local_file(&key);
-    let pb = crate::progress::new(bytes);
-    let msg = format!("Creating sample file.");
-    pb.set_message(msg);
-    pb.set_position(0);
+    // let pb = crate::progress::new(bytes);
+    // let msg = format!("Creating sample file.");
+    // pb.set_message(msg);
+    // pb.set_position(0);
     while file.metadata().unwrap().len() < bytes {
         let position = file.metadata().unwrap().len();
         let rand_string: String = thread_rng()
@@ -64,13 +64,13 @@ pub fn _create_test_file(key: &str, bytes: u64) -> File {
             .expect("Error writing to file.");
         file.write_all(return_string.as_ref())
             .expect("Error writing to file.");
-        let position = file.metadata().unwrap().len();
-        let msg = format!("{} of {} bytes written.", position, bytes);
-        pb.set_message(msg);
-        pb.set_position(position);
+        // let position = file.metadata().unwrap().len();
+        // let msg = format!("{} of {} bytes written.", position, bytes);
+        // pb.set_message(msg);
+        // pb.set_position(position);
     }
-    let msg = format!("{} of {} bytes written.", bytes, bytes);
-    pb.finish_with_message(msg);
+    // let msg = format!("{} of {} bytes written.", bytes, bytes);
+    // pb.finish_with_message(msg);
     File::open(key).unwrap()
 }
 

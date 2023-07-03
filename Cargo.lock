@@ -668,6 +668,7 @@ dependencies = [
  "aws-smithy-http",
  "aws-smithy-types",
  "clap",
+ "console",
  "dotenv",
  "futures",
  "futures-util",

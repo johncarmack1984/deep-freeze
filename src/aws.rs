@@ -79,9 +79,9 @@ pub async fn multipart_upload(
         panic!("Too many chunks! Try increasing your chunk size.")
     }
     let mut upload_parts: Vec<CompletedPart> = Vec::new();
-    let pb = crate::progress::new(file_size);
-    let msg = format!("⬆️  Uploading {} to {}", key, bucket);
-    pb.set_message(msg);
+    // let pb = crate::progress::new(file_size);
+    // let msg = format!("⬆️  Uploading {} to {}", key, bucket);
+    // pb.set_message(msg);
     for chunk_index in 0..chunk_count {
         let this_chunk = if chunk_count - 1 == chunk_index {
             size_of_last_chunk
@@ -89,10 +89,10 @@ pub async fn multipart_upload(
             chunk_size
         };
         let uploaded = chunk_index * chunk_size;
-        let percent = (uploaded as f64 / file_size as f64) * 100.0;
-        pb.set_message(format!(
-            "⬆️  {percent:.1}% uploaded. Chunk {chunk_index} of {chunk_count}",
-        ));
+        // let percent = (uploaded as f64 / file_size as f64) * 100.0;
+        // pb.set_message(format!(
+        //     "⬆️  {percent:.1}% uploaded. Chunk {chunk_index} of {chunk_count}",
+        // ));
         let stream = ByteStream::read_from()
             .path(Path::new(local_path))
             .offset(uploaded)
@@ -117,9 +117,9 @@ pub async fn multipart_upload(
                 .part_number(part_number)
                 .build(),
         );
-        pb.set_position(uploaded + this_chunk);
+        // pb.set_position(uploaded + this_chunk);
     }
-    pb.finish_with_message("⬆️  All chunks uploaded.");
+    // pb.finish_with_message("⬆️  All chunks uploaded.");
     let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
         .set_parts(Some(upload_parts))
         .build();
@@ -143,22 +143,23 @@ pub async fn singlepart_upload(
     local_path: &str,
     bucket: &str,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    let mut body = TrackableBodyStream::try_from(PathBuf::from(local_path))
+    // let mut body = TrackableBodyStream::try_from(PathBuf::from(local_path))
+    let body = TrackableBodyStream::try_from(PathBuf::from(local_path))
         .map_err(|e| {
             panic!("Could not open sample file: {}", e);
         })
         .unwrap();
-    let pb = crate::progress::new(body.content_length() as u64);
-    body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
-        let percent = (sent as f64 / tot_size as f64) * 100.0;
-        let msg = format!("⬆️  {:.1}% uploaded.", percent);
-        pb.set_message(msg);
-        pb.inc(cur_buf as u64);
-        if sent == tot_size {
-            pb.set_message(format!("⬆️  Finished uploading"));
-            pb.finish();
-        }
-    });
+    // let pb = crate::progress::new(body.content_length() as u64);
+    // body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
+    //     let percent = (sent as f64 / tot_size as f64) * 100.0;
+    //     let msg = format!("⬆️  {:.1}% uploaded.", percent);
+    //     pb.set_message(msg);
+    //     pb.inc(cur_buf as u64);
+    //     if sent == tot_size {
+    //         pb.set_message(format!("⬆️  Finished uploading"));
+    //         pb.finish();
+    //     }
+    // });
 
     let _upload_res = client
         .put_object()
