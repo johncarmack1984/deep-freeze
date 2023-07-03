@@ -179,15 +179,14 @@ pub fn set_unmigrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     }
 }
 
-// pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
-//     let query = "SELECT * FROM paths WHERE migrated < 1";
-//     connection
-//         .prepare(query)
-//         .unwrap()
-//         .into_iter()
-//         .map(|row| row.unwrap())
-//         .collect::<Vec<_>>()
-// }
+pub fn set_skip(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
+    match connection.execute(format!(
+        "UPDATE paths SET skip = 1 WHERE dropbox_id = '{dropbox_id}';",
+    )) {
+        Ok(_) => println!("🪹   Skipping: {dropbox_id}"),
+        Err(err) => panic!("❌  {err}"),
+    }
+}
 
 pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> String {
     let size: f64;
@@ -222,3 +221,13 @@ pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) 
         .next()
         .unwrap()
 }
+
+// pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
+//     let query = "SELECT * FROM paths WHERE migrated < 1";
+//     connection
+//         .prepare(query)
+//         .unwrap()
+//         .into_iter()
+//         .map(|row| row.unwrap())
+//         .collect::<Vec<_>>()
+// }
