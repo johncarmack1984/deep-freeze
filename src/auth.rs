@@ -88,7 +88,14 @@ async fn refresh_token(http: &HTTPClient) -> Result<(), Box<dyn std::error::Erro
         Some(result) => panic!("🛑 {result}"),
         None => {
             dbg!(&json);
+            //             🚫  Access token expired
+            // [src/auth.rs:90] &json = Object {
+            //     "error": String("invalid_grant"),
+            //     "error_description": String("refresh token is malformed"),
+            // }
             let access_token = json.get("access_token").unwrap().to_string().to_owned();
+            //             thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', src/auth.rs:91:57
+            // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
             assert_ne!(access_token, "null", "🛑  Access Token Null");
             assert_ne!(
                 access_token,
