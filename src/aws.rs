@@ -297,9 +297,12 @@ mod tests {
             .unwrap();
         let attrs = crate::aws::get_s3_attrs(&aws, &BUCKET, &key).await.unwrap();
         assert_eq!(attrs.object_size(), local_size, "🚫  sizes don't match");
-        assert!(crate::aws::delete_from_s3(&aws, &BUCKET, &key)
-            .await
-            .is_ok());
+        assert!(
+            crate::aws::delete_from_s3(&aws, &BUCKET, &key)
+                .await
+                .is_ok(),
+            "🚫  file deletion unsuccessful"
+        );
     }
 
     #[tokio::test]
