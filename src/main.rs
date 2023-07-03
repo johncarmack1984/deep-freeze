@@ -57,31 +57,32 @@ struct Args {
 async fn main() {
     init(Args::parse()).await;
 
-    let pb = crate::progress::new(6);
-    pb.set_message("Initializing...");
+    // let pb = crate::progress::new(6);
+    // pb.set_message("Initializing...");
 
     let http: HTTPClient = http::new_client();
-    pb.inc(1);
+    // pb.inc(1);
     auth::check_account(&http).await;
-    pb.inc(1);
+    // pb.inc(1);
     let sqlite: DBConnection = db::connect(
         std::env::var("DBFILE")
             .unwrap_or("db.sqlite".to_string())
             .as_str(),
     );
-    pb.inc(1);
+    // pb.inc(1);
     dropbox::get_paths(&http, &sqlite).await;
-    pb.inc(1);
+    // pb.inc(1);
     let aws: AWSClient = aws::new_client().await;
-    pb.inc(1);
+    // pb.inc(1);
     match deepfreeze::perform_migration(http, sqlite, aws).await {
         Ok(_) => {
-            pb.finish_with_message("🎉 Migration complete");
-            println!("🎉 Migration complete");
+            // pb.finish_with_message("🎉 Migration complete");
+            println!("✅ Migration complete");
             ::std::process::exit(0)
         }
-        Err(e) => {
-            pb.finish_with_message(format!("🚨 Migration failed: {}", e));
+        Err(_e) => {
+            // pb.finish_with_message(format!("🚨 Migration failed: {}", e));
+            println!("🚨 Migration failed");
             ::std::process::exit(1)
         }
     }
@@ -105,7 +106,7 @@ async fn init(args: Args) {
         ::std::env::set_var("S3_BUCKET", "deep-freeze-test");
         ::std::env::set_var("RUST_BACKTRACE", "1");
     }
-    if env::var("RESET").unwrap() == "true" {
+    if env::var("RESET").unwrap() == "true" || env::var("RESET_ONLY").unwrap() == "true" {
         reset().await;
         if env::var("RESET_ONLY").unwrap() == "true" {
             println!("👌  Reset only");

@@ -14,7 +14,6 @@ async fn check_migration_status(
     aws: &AWSClient,
     sqlite: &DBConnection,
     row: &DBRow,
-    // ) -> Result<(), Box<dyn std::error::Error>> {
 ) -> i64 {
     let dropbox_path = row
         .try_read::<&str, &str>("dropbox_path")
@@ -64,7 +63,6 @@ async fn migrate_file_to_s3(
     sqlite: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("");
-    // let migrated = row.try_read::<i64, &str>("migrated").unwrap();
     let migrated: i64 = check_migration_status(&http, &aws, &sqlite, &row).await;
     let dropbox_id = row
         .try_read::<&str, &str>("dropbox_id")
@@ -123,9 +121,25 @@ pub async fn perform_migration(
         .into_iter()
         .map(|row| row.unwrap())
     {
-        migrate_file_to_s3(row, &http, &aws, &sqlite).await.unwrap();
+        let dropbox_id = row
+            .try_read::<&str, &str>("dropbox_id")
+            .unwrap()
+            .to_string();
+        let filter = |&i| i == dropbox_id;
+        if env::var("SKIP_ARRAY")
+            .unwrap_or("".to_string())
+            .split(',')
+            .collect::<Vec<&str>>()
+            .iter()
+            .any(filter)
+        {
+            println!("");
+            println!("✅ Skipping {dropbox_id}");
+            continue;
+        } else {
+            migrate_file_to_s3(row, &http, &aws, &sqlite).await.unwrap();
+        }
     }
     println!("");
-    println!("✅ Migration complete");
     Ok(())
 }

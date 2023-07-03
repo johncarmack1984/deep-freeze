@@ -87,6 +87,7 @@ async fn refresh_token(http: &HTTPClient) -> Result<(), Box<dyn std::error::Erro
     match json.get("error_summary").map(|s| s.as_str().unwrap()) {
         Some(result) => panic!("🛑 {result}"),
         None => {
+            dbg!(&json);
             let access_token = json.get("access_token").unwrap().to_string().to_owned();
             assert_ne!(access_token, "null", "🛑  Access Token Null");
             assert_ne!(
@@ -145,7 +146,7 @@ pub async fn check_account(http: &reqwest::Client) {
             println!("🚫  Access token expired");
             match refresh_token(&http).await {
                 Ok(_) => println!("🔑  Refreshed access token"),
-                Err(err) => panic!("❌  {err}"),
+                Err(err) => eprintln!("❌  {err}"),
             }
         }
         Some("invalid_access_token/") => {

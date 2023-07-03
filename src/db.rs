@@ -55,7 +55,8 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 local_size INTEGER DEFAULT NULL,
                 s3_key TEXT UNIQUE DEFAULT NULL,
                 s3_size INTEGER DEFAULT NULL,
-                s3_hash TEXT UNIQUE DEFAULT NULL
+                s3_hash TEXT UNIQUE DEFAULT NULL,
+                skip INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS user (
                 dropbox_user_id TEXT NOT NULL,
