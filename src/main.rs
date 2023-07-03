@@ -36,9 +36,7 @@ struct Args {
     /// Run in silent mode
     #[arg(short, long, default_value = "false")]
     silent: bool,
-    /// Skip these paths
-    /// (comma-separated)
-    /// (e.g. --skip "path1,path2")
+    /// Skip these paths (e.g. --skip "path1,path2")
     #[arg(short = 'k', long)]
     skip: Vec<String>,
     /// Path to the temp directory
@@ -50,31 +48,21 @@ struct Args {
 async fn main() {
     init(Args::parse()).await;
 
-    // let pb = crate::progress::new(6);
-    // pb.set_message("Initializing...");
-
     let http: HTTPClient = http::new_client();
-    // pb.inc(1);
     auth::check_account(&http).await;
-    // pb.inc(1);
     let sqlite: DBConnection = db::connect(
         std::env::var("DBFILE")
             .unwrap_or("db.sqlite".to_string())
             .as_str(),
     );
-    // pb.inc(1);
     dropbox::get_paths(&http, &sqlite).await;
-    // pb.inc(1);
     let aws: AWSClient = aws::new_client().await;
-    // pb.inc(1);
     match deepfreeze::perform_migration(http, sqlite, aws).await {
         Ok(_) => {
-            // pb.finish_with_message("🎉 Migration complete");
             println!("✅ Migration complete");
             ::std::process::exit(0)
         }
         Err(_e) => {
-            // pb.finish_with_message(format!("🚨 Migration failed: {}", e));
             println!("🚨 Migration failed");
             ::std::process::exit(1)
         }
