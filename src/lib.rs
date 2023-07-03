@@ -1,12 +1,16 @@
-use std::{path::PathBuf, task::Poll};
-
 use aws_sdk_s3::primitives::ByteStream;
 use aws_smithy_http::body::SdkBody;
 use futures::{Future, Stream};
 use hyper::body::Bytes;
+use std::{path::PathBuf, task::Poll};
 use tokio::{fs::File, io::AsyncReadExt};
 
 const DEFAULT_BUFFER_SIZE: usize = 2048;
+
+pub const MIN_CHUNK_SIZE: u64 = 5242880; // 5 MiB in bytes
+pub const MAX_CHUNK_SIZE: u64 = 5368709120; // 5 GiB in bytes
+pub const MAX_UPLOAD_SIZE: u64 = 5497558138880; // 5 TiB in bytes
+pub const MAX_CHUNKS: u64 = 10000;
 
 /// The callback function triggered every time a chunck of the source file is read
 /// in the buffer.

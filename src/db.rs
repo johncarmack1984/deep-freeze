@@ -10,6 +10,13 @@ pub fn connect(dbpath: &str) -> ConnectionWithFullMutex {
     sqlite
 }
 
+pub fn reset(dbpath: &str) {
+    if crate::localfs::local_file_exists(dbpath) {
+        std::fs::remove_file(dbpath).unwrap();
+    }
+    connect(dbpath);
+}
+
 pub fn report_status(sqlite: &ConnectionWithFullMutex) {
     let total_rows = count_rows(&sqlite);
     println!("🗃️  {total_rows} files in database");

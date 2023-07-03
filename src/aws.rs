@@ -4,21 +4,20 @@ use aws_config::SdkConfig;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
+use aws_sdk_s3::types::{
+    CompletedMultipartUpload, CompletedPart, Object, ObjectAttributes, StorageClass,
+};
 use aws_sdk_s3::{Client, Error};
 use aws_smithy_http::byte_stream::{ByteStream, Length};
 use aws_smithy_http::result::SdkError;
-use deep_freeze::TrackableBodyStream;
+use deep_freeze::{
+    TrackableBodyStream, MAX_CHUNKS, MAX_CHUNK_SIZE, MAX_UPLOAD_SIZE, MIN_CHUNK_SIZE,
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
 pub type AWSClient = Client;
-
-const MIN_CHUNK_SIZE: u64 = 5242880; // 5 MiB in bytes
-const MAX_CHUNK_SIZE: u64 = 5368709120; // 5 GiB in bytes
-const MAX_UPLOAD_SIZE: u64 = 5497558138880; // 5 TiB in bytes
-const MAX_CHUNKS: u64 = 10000;
 
 pub async fn new_client() -> Client {
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
@@ -83,11 +82,7 @@ pub async fn multipart_upload(
         panic!("Too many chunks! Try increasing your chunk size.")
     }
     let mut upload_parts: Vec<CompletedPart> = Vec::new();
-    let pb = ProgressBar::new(file_size);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .unwrap()
-        .progress_chars("█  "));
+    let pb = crate::progress::new(file_size);
     let msg = format!("⬆️  Uploading {} to {}", key, bucket);
     pb.set_message(msg);
     for chunk_index in 0..chunk_count {
@@ -156,20 +151,16 @@ pub async fn singlepart_upload(
             panic!("Could not open sample file: {}", e);
         })
         .unwrap();
-    let pb = ProgressBar::new(body.content_length() as u64);
+    let pb = crate::progress::new(body.content_length() as u64);
     body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
-        pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green} [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .unwrap()
-        .progress_chars("█  "));
         let percent = (sent as f64 / tot_size as f64) * 100.0;
         let msg = format!("⬆️  {:.1}% uploaded.", percent);
         pb.set_message(msg);
         pb.inc(cur_buf as u64);
         if sent == tot_size {
-                pb.set_message(format!("⬆️  Finished uploading"));
-                pb.finish();
-            }
+            pb.set_message(format!("⬆️  Finished uploading"));
+            pb.finish();
+        }
     });
 
     let _upload_res = client
@@ -237,13 +228,46 @@ pub async fn delete_from_s3(
     }
 }
 
+pub async fn _empty_test_bucket() {
+    println!("🗑️  Emptying test bucket");
+    let aws = new_client().await;
+    let bucket = "deep-freeze-test".to_string();
+    let mut objects = aws
+        .list_objects_v2()
+        .bucket(&bucket)
+        .send()
+        .await
+        .unwrap()
+        .contents
+        .unwrap_or(Vec::new());
+    if objects.len() == 0 {
+        return;
+    }
+    while objects.len() > 0 {
+        for object in objects {
+            let key = object.key.unwrap();
+            delete_from_s3(&aws, &bucket, &key).await;
+        }
+        objects = aws
+            .list_objects_v2()
+            .bucket(&bucket)
+            .send()
+            .await
+            .unwrap()
+            .contents
+            .unwrap_or(Vec::new());
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::env;
     const BUCKET: &str = "deep-freeze-test";
 
     #[tokio::test]
     async fn it_uploads_to_s3() {
         dotenv::dotenv().ok();
+        env::set_var("SILENT", "true");
         let aws = crate::aws::new_client().await;
         let key = String::from("test-s3-upload.txt");
         let local_path = String::from(format!("./test/{key}"));
@@ -263,6 +287,7 @@ mod tests {
     #[tokio::test]
     async fn it_gets_s3_attrs() {
         dotenv::dotenv().ok();
+        env::set_var("SILENT", "true");
         let aws = crate::aws::new_client().await;
         let key = String::from("test-s3-get-attrs.txt");
         let local_path = String::from(format!("./test/{key}"));
@@ -279,6 +304,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_deletes_from_s3() {
+        env::set_var("SILENT", "true");
         let aws = crate::aws::new_client().await;
         let key = String::from("test-s3-delete.txt");
         let local_path = String::from(format!("./test/{key}"));

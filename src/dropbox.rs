@@ -1,5 +1,4 @@
 use futures_util::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
 use std::cmp::min;
 use std::io::Write;
 use std::{env, error::Error};
@@ -128,26 +127,21 @@ pub async fn download_from_dropbox(
         .headers(headers)
         .send()
         .await?;
+    let mut stream = res.bytes_stream();
     let mut file;
     let mut downloaded: u64 = 0;
-    let mut stream = res.bytes_stream();
+    let pb = crate::progress::new(dropbox_size as u64);
     file = create_local_file(&local_path);
-    let pb = ProgressBar::new(dropbox_size as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .unwrap()
-        .progress_chars("█  "));
     pb.set_message(format!("⬇️ Downloading {dropbox_id}"));
-    pb.set_position(0);
     while let Some(item) = stream.next().await {
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
-        file.write(&chunk)
-            .or(Err(format!("❌  Error while writing to file")))?;
         let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
         downloaded = new;
         let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
+        pb.set_position(downloaded);
         pb.set_message(format!("⬇️ ({percent:.2}%) downloaded.", percent = percent,));
-        pb.set_position(new);
+        file.write(&chunk)
+            .or(Err(format!("❌  Error while writing to file")))?;
     }
     let finished_msg = format!("⬇️  Finished downloading {dropbox_id}");
     pb.finish_with_message(finished_msg);
@@ -172,6 +166,7 @@ mod tests {
     #[tokio::test]
     async fn it_downloads_from_dropbox() {
         dotenv::dotenv().ok();
+        ::std::env::set_var("SILENT", "true");
         let base_folder: &str = "/deep-freeze-test";
         let file_name: &str = "test-dropbox-download.txt";
         let http = crate::http::new_client();

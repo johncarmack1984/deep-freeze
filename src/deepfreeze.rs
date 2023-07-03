@@ -14,7 +14,8 @@ async fn check_migration_status(
     aws: &AWSClient,
     sqlite: &DBConnection,
     row: &DBRow,
-) -> Result<(), Box<dyn std::error::Error>> {
+    // ) -> Result<(), Box<dyn std::error::Error>> {
+) -> i64 {
     let dropbox_path = row
         .try_read::<&str, &str>("dropbox_path")
         .unwrap()
@@ -33,6 +34,7 @@ async fn check_migration_status(
             AWSError::NoSuchKey(_) => {
                 println!("❌  Not found: s3:://{}/{}", bucket, key);
                 db::set_unmigrated(&sqlite, &dropbox_id);
+                0
             }
             _ => panic!("❌  {}", err),
         },
@@ -40,17 +42,18 @@ async fn check_migration_status(
             true => {
                 println!("✅ Files the same size on DB & S3");
                 db::set_migrated(&sqlite, &dropbox_id);
+                1
             }
             false => {
                 println!("❌ File exists on S3, but is not the correct size");
                 println!("🗳️  DB size: {dropbox_size}");
                 println!("🗂️  S3 size: {}", s3_attrs.object_size());
-                aws::delete_from_s3(&aws, &bucket, &key).await?;
+                aws::delete_from_s3(&aws, &bucket, &key).await;
                 db::set_unmigrated(&sqlite, &dropbox_id);
+                0
             }
         },
     }
-    Ok(())
 }
 
 #[async_recursion::async_recursion(?Send)]
@@ -61,7 +64,8 @@ async fn migrate_file_to_s3(
     sqlite: &sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("");
-    let migrated = row.try_read::<i64, &str>("migrated").unwrap();
+    // let migrated = row.try_read::<i64, &str>("migrated").unwrap();
+    let migrated: i64 = check_migration_status(&http, &aws, &sqlite, &row).await;
     let dropbox_id = row
         .try_read::<&str, &str>("dropbox_id")
         .unwrap()
@@ -78,9 +82,7 @@ async fn migrate_file_to_s3(
 
     let key = util::standardize_path(&dropbox_path);
     let bucket = env::var("S3_BUCKET").unwrap();
-    if migrated.is_negative() {
-        check_migration_status(&http, &aws, &sqlite, &row).await?;
-    }
+    if migrated.is_negative() {}
     match migrated.abs() == 0 {
         true => {
             println!("📂  Migrating {key}");
