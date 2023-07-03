@@ -44,6 +44,7 @@ pub async fn multipart_upload(
     key: &str,
     local_path: &str,
     bucket: &str,
+    m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let res = client
         .create_multipart_upload()
@@ -79,9 +80,9 @@ pub async fn multipart_upload(
         panic!("Too many chunks! Try increasing your chunk size.")
     }
     let mut upload_parts: Vec<CompletedPart> = Vec::new();
-    // let pb = crate::progress::new(file_size);
-    // let msg = format!("⬆️  Uploading {} to {}", key, bucket);
-    // pb.set_message(msg);
+    let pb = m.add(crate::progress::new(file_size, "file_transfer"));
+    let msg = format!("⬆️  Uploading {} to {}", key, bucket);
+    pb.set_message(msg);
     for chunk_index in 0..chunk_count {
         let this_chunk = if chunk_count - 1 == chunk_index {
             size_of_last_chunk
@@ -89,10 +90,10 @@ pub async fn multipart_upload(
             chunk_size
         };
         let uploaded = chunk_index * chunk_size;
-        // let percent = (uploaded as f64 / file_size as f64) * 100.0;
-        // pb.set_message(format!(
-        //     "⬆️  {percent:.1}% uploaded. Chunk {chunk_index} of {chunk_count}",
-        // ));
+        let percent = (uploaded as f64 / file_size as f64) * 100.0;
+        pb.set_message(format!(
+            "⬆️  {percent:.1}% uploaded. Chunk {chunk_index} of {chunk_count}",
+        ));
         let stream = ByteStream::read_from()
             .path(Path::new(local_path))
             .offset(uploaded)
@@ -117,13 +118,13 @@ pub async fn multipart_upload(
                 .part_number(part_number)
                 .build(),
         );
-        // pb.set_position(uploaded + this_chunk);
+        pb.set_position(uploaded + this_chunk);
     }
-    // pb.finish_with_message("⬆️  All chunks uploaded.");
+    pb.set_message("⬆️  All chunks uploaded.");
     let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
         .set_parts(Some(upload_parts))
         .build();
-    println!("⏳  Completing upload.");
+    pb.set_message("⏳  Completing upload.");
     let _complete_multipart_upload_res = client
         .complete_multipart_upload()
         .bucket(bucket)
@@ -133,7 +134,9 @@ pub async fn multipart_upload(
         .send()
         .await
         .unwrap();
-    println!("✅ Done uploading file.");
+    pb.finish_with_message("✅ Done uploading file.");
+    // pb.finish_and_clear();
+    // println!("✅ Done uploading file.");
     Ok(())
 }
 
@@ -142,26 +145,29 @@ pub async fn singlepart_upload(
     key: &str,
     local_path: &str,
     bucket: &str,
+    m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    // let mut body = TrackableBodyStream::try_from(PathBuf::from(local_path))
-    let body = TrackableBodyStream::try_from(PathBuf::from(local_path))
+    let mut body = TrackableBodyStream::try_from(PathBuf::from(local_path))
         .map_err(|e| {
             panic!("Could not open sample file: {}", e);
         })
         .unwrap();
-    // let pb = crate::progress::new(body.content_length() as u64);
-    // body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
-    //     let percent = (sent as f64 / tot_size as f64) * 100.0;
-    //     let msg = format!("⬆️  {:.1}% uploaded.", percent);
-    //     pb.set_message(msg);
-    //     pb.inc(cur_buf as u64);
-    //     if sent == tot_size {
-    //         pb.set_message(format!("⬆️  Finished uploading"));
-    //         pb.finish();
-    //     }
-    // });
-
-    let _upload_res = client
+    let pb = m.add(crate::progress::new(
+        body.content_length() as u64,
+        "file_transfer",
+    ));
+    body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
+        let percent = (sent as f64 / tot_size as f64) * 100.0;
+        let msg = format!("⬆️  {:.1}% uploaded.", percent);
+        pb.set_message(msg);
+        pb.inc(cur_buf as u64);
+        if sent == tot_size {
+            pb.finish_with_message(format!("⬆️  Finished uploading"));
+            // pb.set_message(format!("⬆️  Finished uploading"));
+            // pb.finish_and_clear();
+        }
+    });
+    client
         .put_object()
         .storage_class(StorageClass::DeepArchive)
         .bucket(bucket)
@@ -169,7 +175,8 @@ pub async fn singlepart_upload(
         .content_length(body.content_length())
         .body(body.to_s3_stream())
         .send()
-        .await?;
+        .await
+        .unwrap();
     Ok(())
 }
 
@@ -178,14 +185,15 @@ pub async fn upload_to_s3(
     key: &str,
     local_path: &str,
     bucket: &str,
+    m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     match localfs::get_local_size(&local_path) {
         0 => panic!("file has no size"),
         size if size >= MAX_UPLOAD_SIZE as i64 => panic!("file is too big"),
         size if size < MAX_CHUNK_SIZE as i64 => {
-            singlepart_upload(&client, &key, &local_path, &bucket).await
+            singlepart_upload(&client, &key, &local_path, &bucket, &m).await
         }
-        _ => multipart_upload(&client, &key, &local_path, &bucket).await,
+        _ => multipart_upload(&client, &key, &local_path, &bucket, &m).await,
     }
 }
 
@@ -260,6 +268,8 @@ pub async fn _empty_test_bucket() {
 #[cfg(test)]
 mod tests {
     use std::env;
+
+    use crate::progress;
     const BUCKET: &str = "deep-freeze-test";
 
     #[tokio::test]
@@ -272,9 +282,15 @@ mod tests {
 
         assert_eq!(
             true,
-            crate::aws::upload_to_s3(&aws, &key, &local_path, &BUCKET)
-                .await
-                .is_ok(),
+            crate::aws::upload_to_s3(
+                &aws,
+                &key,
+                &local_path,
+                &BUCKET,
+                &&progress::new_multi_progress(),
+            )
+            .await
+            .is_ok(),
             "🚫  file upload unsuccessful"
         );
         assert!(crate::aws::delete_from_s3(&aws, &BUCKET, &key)
@@ -290,9 +306,15 @@ mod tests {
         let key = String::from("test-s3-get-attrs.txt");
         let local_path = String::from(format!("./test/{key}"));
         let local_size = crate::localfs::get_local_size(&local_path);
-        crate::aws::upload_to_s3(&aws, &key, &local_path, &BUCKET)
-            .await
-            .unwrap();
+        crate::aws::upload_to_s3(
+            &aws,
+            &key,
+            &local_path,
+            &BUCKET,
+            &&progress::new_multi_progress(),
+        )
+        .await
+        .unwrap();
         let attrs = crate::aws::get_s3_attrs(&aws, &BUCKET, &key).await.unwrap();
         assert_eq!(attrs.object_size(), local_size, "🚫  sizes don't match");
         assert!(
@@ -305,13 +327,20 @@ mod tests {
 
     #[tokio::test]
     async fn it_deletes_from_s3() {
+        dotenv::dotenv().ok();
         env::set_var("SILENT", "true");
         let aws = crate::aws::new_client().await;
         let key = String::from("test-s3-delete.txt");
         let local_path = String::from(format!("./test/{key}"));
-        crate::aws::upload_to_s3(&aws, &key, &local_path, &BUCKET)
-            .await
-            .unwrap();
+        crate::aws::upload_to_s3(
+            &aws,
+            &key,
+            &local_path,
+            &BUCKET,
+            &&progress::new_multi_progress(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             true,
             crate::aws::delete_from_s3(&aws, "deep-freeze-test", "test-s3-delete.txt")
