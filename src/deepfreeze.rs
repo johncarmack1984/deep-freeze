@@ -81,7 +81,7 @@ pub async fn perform_migration(
     // pb_macro.set_position(db::count_migrated(&sqlite) as u64);
 
     for row in sqlite
-        .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path DESC")
+        .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
