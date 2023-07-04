@@ -61,11 +61,11 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
-    print!("🗄️  Getting file list...\n");
+    print!("🗄️  Getting file list...\n\n");
     let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");
-        println!("🗄️  Populating file list...");
+        print!("🗄️  Populating file list...\n\n");
         let mut res = list_folder(&http).await;
         let mut json: JSON = json::from_res(&res);
         add_files_to_list(&json, &sqlite).await.unwrap();

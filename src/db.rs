@@ -18,7 +18,6 @@ pub fn reset(dbpath: &str) {
     if crate::localfs::local_file_exists(dbpath) {
         std::fs::remove_file(dbpath).unwrap();
     }
-    connect(dbpath);
 }
 
 pub fn report_status(sqlite: &ConnectionWithFullMutex) {
@@ -60,8 +59,7 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 local_size INTEGER DEFAULT NULL,
                 s3_key TEXT UNIQUE DEFAULT NULL,
                 s3_size INTEGER DEFAULT NULL,
-                s3_hash TEXT UNIQUE DEFAULT NULL,
-                skip INTEGER NOT NULL DEFAULT 0
+                s3_hash TEXT UNIQUE DEFAULT NULL
             );
             CREATE TABLE IF NOT EXISTS user (
                 dropbox_user_id TEXT UNIQUE NOT NULL,
@@ -90,7 +88,7 @@ pub fn init(connection: &ConnectionWithFullMutex) {
 pub fn insert_dropbox_paths(connection: &DBConnection, entries: &Vec<serde_json::Value>) {
     let statement = build_insert_statement(&entries);
     match connection.execute(&statement) {
-        Ok(_) => println!("🎉 File list updated"),
+        Ok(_) => print!("🎉 File list updated\n\n"),
         Err(err) => {
             println!("❌  Error in statement: {statement}");
             panic!("{}", err);
@@ -252,28 +250,12 @@ pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) 
         .unwrap()
 }
 
-// pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
-//     let query = "SELECT * FROM paths WHERE migrated < 1";
-//     connection
-//         .prepare(query)
-//         .unwrap()
-//         .into_iter()
-//         .map(|row| row.unwrap())
-//         .collect::<Vec<_>>()
-// }
-
-// CREATE TABLE IF NOT EXISTS user (
-//     dropbox_user_id TEXT NOT NULL,
-//     dropbox_refresh_token TEXT NOT NULL,
-//     dropbox_access_token TEXT NOT NULL,
-//     dropbox_authorization_code TEXT NOT NULL,
-//     aws_access_key_id TEXT NOT NULL,
-//     aws_secret_key TEXT NOT NULL
-// );
-// CREATE TABLE IF NOT EXISTS config (
-//     dropbox_app_key TEXT NOT NULL,
-//     dropbox_app_secret TEXT NOT NULL,
-//     dropbox_base_folder TEXT NOT NULL,
-//     s3_bucket TEXT NOT NULL,
-//     aws_region TEXT NOT NULL
-// );
+pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
+    let query = "SELECT * FROM paths WHERE migrated < 1 AND skip < 1";
+    connection
+        .prepare(query)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .collect::<Vec<_>>()
+}

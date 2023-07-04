@@ -28,11 +28,11 @@ static MIGRATION_STEPS: &[&str] = &[
 
 pub async fn perform_migration(
     http: reqwest::Client,
-    sqlite: &mut sqlite::ConnectionWithFullMutex,
+    sqlite: sqlite::ConnectionWithFullMutex,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let aws = aws::new_client().await;
     let started = Instant::now();
-    print!("\n\n");
+    // print!("\n\n");
     let m = progress::new_multi_progress();
     let rows: Vec<_> = sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip = 0 ORDER BY dropbox_path")
@@ -44,7 +44,7 @@ pub async fn perform_migration(
             let aws = aws.clone();
             // let mut sqlite = sqlite;
             // let mut row = row;
-            dbg!(&row);
+            // dbg!(&row);
             let dropbox_id = row.read::<&str, &str>("dropbox_id");
             let size = row.read::<i64, &str>("dropbox_size") as u64;
             let mut pb = m.add(progress::new(size, "file_transfer"));
@@ -68,8 +68,8 @@ pub async fn perform_migration(
                 // migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
                 //     .await
                 //     .unwrap();
-                pb.set_position(size);
-                pb.finish_with_message("Migration complete");
+                // pb.set_position(size);
+                // pb.finish_with_message("Migration complete");
             })
         })
         .collect();
@@ -165,7 +165,7 @@ async fn check_migration_status(
     aws: &AWSClient,
     // sqlite: &DBConnection,
 ) -> (ProgressBar, i64) {
-    println!("📂  Checking migration status for file");
+    // println!("📂  Checking migration status for file");
     // let dropbox_path = row
     //     .try_read::<&str, &str>("dropbox_path")
     //     .unwrap()

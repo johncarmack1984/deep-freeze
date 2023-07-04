@@ -49,14 +49,8 @@ struct Args {
 #[tokio::main]
 async fn main() {
     print!("\n🧊🧊🧊 Deep Freeze - Migrate Files to S3 Deep Archive 🧊🧊🧊\n\n");
-    init(Args::parse()).await;
+    let (http, sqlite) = init(Args::parse()).await;
 
-    let http: HTTPClient = http::new_client();
-    let sqlite: DBConnection = db::connect(
-        std::env::var("DBFILE")
-            .unwrap_or("db.sqlite".to_string())
-            .as_str(),
-    );
     auth::check_account(&http, &sqlite).await;
     dropbox::get_paths(&http, &sqlite).await;
     match deepfreeze::perform_migration(http, sqlite).await {
@@ -71,7 +65,7 @@ async fn main() {
     }
 }
 
-async fn init(args: Args) {
+async fn init(args: Args) -> (HTTPClient, DBConnection) {
     dotenv().ok();
     setenv("SILENT", args.silent.to_string());
     if env::var("SILENT").unwrap() == "true" {
@@ -97,6 +91,13 @@ async fn init(args: Args) {
             ::std::process::exit(0)
         }
     }
+    let http: HTTPClient = http::new_client();
+    let sqlite: DBConnection = db::connect(
+        std::env::var("DBFILE")
+            .unwrap_or("db.sqlite".to_string())
+            .as_str(),
+    );
+    (http, sqlite)
 }
 
 async fn reset() {
@@ -110,5 +111,5 @@ async fn reset() {
         crate::aws::_empty_test_bucket().await;
         println!("🚮  Test bucket reset");
     }
-    println!("🎉 Reset complete");
+    print!("🎉 Reset complete\n\n");
 }
