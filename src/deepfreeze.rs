@@ -7,92 +7,25 @@ use crate::localfs;
 use crate::progress;
 use crate::util;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
-// use indicatif::MultiProgress;
-// use indicatif::ProgressStyle;
 use std::env;
-// use std::sync::Arc;
-// use std::thread;
-// use std::time::{Duration, Instant};
-// use std::time::Instant;
-
-// use console::{style, Emoji};
-// use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressStyle};
-// use rand::seq::SliceRandom;
-// use rand::Rng;
-
-// static PACKAGES: &[&str] = &[
-//     "fs-events",
-//     "my-awesome-module",
-//     "emoji-speaker",
-//     "wrap-ansi",
-//     "stream-browserify",
-//     "acorn-dynamic-import",
-// ];
-
-// static COMMANDS: &[&str] = &[
-//     "cmake .",
-//     "make",
-//     "make clean",
-//     "gcc foo.c -o foo",
-//     "gcc bar.c -o bar",
-//     "./helper.sh rebuild-cache",
-//     "make all-clean",
-//     "make test",
-// ];
-
-// static LOOKING_GLASS: Emoji<'_, '_> = Emoji("🔍  ", "");
-// static TRUCK: Emoji<'_, '_> = Emoji("🚚  ", "");
-// static CLIP: Emoji<'_, '_> = Emoji("🔗  ", "");
-// static PAPER: Emoji<'_, '_> = Emoji("📃  ", "");
-// static SPARKLE: Emoji<'_, '_> = Emoji("✨ ", ":-)");
 
 pub async fn perform_migration(
     http: reqwest::Client,
     sqlite: sqlite::ConnectionWithFullMutex,
     aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    print!("\n\n");
-    // let mut rng = rand::thread_rng();
-    // let started = Instant::now();
-    // let spinner_style = ProgressStyle::with_template("{prefix:.bold.dim} {spinner} {wide_msg}")
-    //     .unwrap()
-    //     .tick_chars("⠁⠂⠄⡀⢀⠠⠐⠈ ");
-    // println!(
-    //     "{} {}Resolving packages...",
-    //     style("[1/4]").bold().dim(),
-    //     LOOKING_GLASS
-    // );
-    // println!(
-    //     "{} {}Fetching packages...",
-    //     style("[2/4]").bold().dim(),
-    //     TRUCK
-    // );
-
-    // println!(
-    //     "{} {}Linking dependencies...",
-    //     style("[3/4]").bold().dim(),
-    //     CLIP
-    // );
-    // pb.tick();
+    print!("\n🧊  Performing migration...\n\n\n\n");
     let m = progress::new_multi_progress();
-    // let total_rows = db::count_rows(&sqlite);
-    // let mut pb_macro = m.add(progress::new(total_rows as u64));
-    // pb_macro = progress::set_style_migration_progress_units(pb_macro);
-    // pb_macro.set_position(db::count_migrated(&sqlite) as u64);
-
     for row in sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
     {
-        // let mut pb_local = m.add(progress::new(4));
-        // pb_local = progress::set_style_migration_progress_units(pb_local);
         let dropbox_id = row
             .try_read::<&str, &str>("dropbox_id")
             .unwrap()
             .to_string();
-        // pb_local.set_prefix(format!("[{}/{}]", count + 1, total_rows));
         let filter = |&i| i == dropbox_id;
         if env::var("SKIP_ARRAY")
             .unwrap_or("".to_string())
@@ -101,23 +34,18 @@ pub async fn perform_migration(
             .iter()
             .any(filter)
         {
-            // pb_macro.set_message(format!("✅ Skipping {dropbox_id}"));
             println!("✅ Skipping {dropbox_id}");
             continue;
         } else {
-            // pb_macro.set_message(format!("📂  Migrating {dropbox_id}"));
             migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
                 .await
                 .unwrap();
         }
-        // pb_macro.inc(1);
     }
-    // pb_macro.finish_with_message("done");
     println!("");
     Ok(())
 }
 
-// #[async_recursion::async_recursion(?Send)]
 async fn migrate_file_to_s3(
     row: sqlite::Row,
     http: &reqwest::Client,
@@ -125,7 +53,6 @@ async fn migrate_file_to_s3(
     sqlite: &sqlite::ConnectionWithFullMutex,
     m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("");
     let dropbox_id = row
         .try_read::<&str, &str>("dropbox_id")
         .unwrap()
@@ -134,7 +61,7 @@ async fn migrate_file_to_s3(
     match check_migration_status(&aws, &sqlite, &row).await {
         0 => (),
         1 => {
-            println!("🪺  Already migrated");
+            print!("🪺  Already migrated\n\n");
             return Ok(());
         }
         err => {
@@ -184,6 +111,7 @@ async fn migrate_file_to_s3(
 
     db::set_migrated(&sqlite, &dropbox_id);
     localfs::delete_local_file(&local_path);
+    print!("\n\n");
     return Ok(());
 }
 

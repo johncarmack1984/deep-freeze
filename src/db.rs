@@ -23,14 +23,16 @@ pub fn reset(dbpath: &str) {
 
 pub fn report_status(sqlite: &ConnectionWithFullMutex) {
     let total_rows = count_rows(&sqlite);
-    println!("🗃️  {total_rows} files in database");
+    let total_size = get_pretty_total_size(&sqlite);
+    println!("🗃️   Total: {total_rows} files ({total_size})");
     let migrated_rows = count_migrated(&sqlite);
+    let migrated_size = get_pretty_migrated_size(&sqlite);
     if migrated_rows > 0 {
-        println!("🎉 {migrated_rows} already migrated");
+        println!("🪺  Migrated: {migrated_rows} files ({migrated_size})");
     }
     let unmigrated_rows = total_rows - migrated_rows;
     let unmigrated_size: String = get_pretty_unmigrated_size(sqlite);
-    println!("🗃️  {unmigrated_rows} files ({unmigrated_size}) left to migrate");
+    println!("🪹  Remaining: {unmigrated_rows} files ({unmigrated_size})");
     let percent = if migrated_rows > 0 {
         (100 * migrated_rows / total_rows).abs()
     } else {
@@ -42,7 +44,7 @@ pub fn report_status(sqlite: &ConnectionWithFullMutex) {
             println!("🎉 All files migrated");
             std::process::exit(0);
         }
-        _ => println!("🎉 {percent}% done!"),
+        _ => println!("🎉  {percent}% done!"),
     }
 }
 
@@ -81,7 +83,7 @@ pub fn init(connection: &ConnectionWithFullMutex) {
             );
             ",
     ) {
-        Ok(_) => println!("📁 Database initialized"),
+        Ok(_) => println!("📁  Database initialized"),
         Err(err) => panic!("❌  {err}"),
     }
 }
@@ -214,6 +216,50 @@ pub fn set_skip(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     )) {
         Ok(_) => println!("🪹   Skipping: {dropbox_id}"),
         Err(err) => panic!("❌  {err}"),
+    }
+}
+
+pub fn get_pretty_total_size(connection: &ConnectionWithFullMutex) -> String {
+    let size: f64;
+    if count_rows(connection) == 0 {
+        size = 0.0;
+    } else {
+        let query = "SELECT SUM(dropbox_size) FROM paths";
+        size = connection
+            .prepare(query)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.unwrap())
+            .map(|row| row.read::<i64, _>(0))
+            .next()
+            .unwrap() as f64;
+    }
+    match size {
+        size if size == 0.0 => "0 bytes".to_string(),
+        size if size > 0.0 => pretty_bytes::converter::convert(size),
+        _ => panic!("❌  Negative size"),
+    }
+}
+
+pub fn get_pretty_migrated_size(connection: &ConnectionWithFullMutex) -> String {
+    let size: f64;
+    if count_migrated(connection) == 0 {
+        size = 0.0;
+    } else {
+        let query = "SELECT SUM(dropbox_size) FROM paths WHERE migrated = 1";
+        size = connection
+            .prepare(query)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.unwrap())
+            .map(|row| row.read::<i64, _>(0))
+            .next()
+            .unwrap() as f64;
+    }
+    match size {
+        size if size == 0.0 => "0 bytes".to_string(),
+        size if size > 0.0 => pretty_bytes::converter::convert(size),
+        _ => panic!("❌  Negative size"),
     }
 }
 

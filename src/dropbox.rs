@@ -61,7 +61,7 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
-    print!("🗄️  Getting file list...\n");
+    print!("🗄️   Getting file list...\n");
     let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");
@@ -132,7 +132,7 @@ pub async fn download_from_dropbox(
     let mut file;
     let mut downloaded: u64 = 0;
     let pb = m.add(crate::progress::new(dropbox_size as u64, "file_transfer"));
-    pb.set_prefix("⬇️  Downloading ");
+    pb.set_prefix("⬇️   Download  ");
     file = create_local_file(&local_path);
     while let Some(item) = stream.next().await {
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
