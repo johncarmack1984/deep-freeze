@@ -1,5 +1,9 @@
+use std::env;
+
 use sedregex::find_and_replace;
 use sqlite::{self, ConnectionWithFullMutex};
+
+use crate::json::JSON;
 
 pub type DBConnection = ConnectionWithFullMutex;
 pub type DBRow = sqlite::Row;
@@ -59,12 +63,14 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 skip INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS user (
-                dropbox_user_id TEXT NOT NULL,
+                dropbox_user_id TEXT UNIQUE NOT NULL,
+                dropbox_team_member_id TEXT NOT NULL,
+                dropbox_email TEXT NOT NULL,
                 dropbox_refresh_token TEXT NOT NULL,
                 dropbox_access_token TEXT NOT NULL,
                 dropbox_authorization_code TEXT NOT NULL,
                 aws_access_key_id TEXT NOT NULL,
-                aws_secret_key TEXT NOT NULL
+                aws_secret_access_key TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS config (
                 dropbox_app_key TEXT NOT NULL,
@@ -123,6 +129,29 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .unwrap()
         .to_string()
         .to_owned()
+}
+
+pub fn insert_user(connection: &ConnectionWithFullMutex, json: &JSON) {
+    let dropbox_user_id = json.get("account_id").unwrap().as_str().unwrap();
+    let dropbox_team_member_id = json.get("team_member_id").unwrap().as_str().unwrap();
+    let dropbox_email = json.get("email").unwrap().as_str().unwrap();
+    let dropbox_refresh_token = env::var("DROPBOX_REFRESH_TOKEN").unwrap_or(String::new());
+    let dropbox_access_token = env::var("DROPBOX_ACCESS_TOKEN").unwrap_or(String::new());
+    let dropbox_authorization_code =
+        env::var("DROPBOX_AUTHORIZATION_CODE").unwrap_or(String::new());
+    let aws_access_key_id = env::var("AWS_ACCESS_KEY_ID").unwrap_or(String::new());
+    let aws_secret_access_key = env::var("AWS_SECRET_ACCESS_KEY").unwrap_or(String::new());
+    let statement = format!(
+            "INSERT OR REPLACE INTO user (dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key) VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}');",
+            dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key
+        );
+    match connection.execute(&statement) {
+        Ok(_) => (),
+        Err(err) => {
+            print!("\n\n❌  Error in statement:\n\n{:?}\n\n", statement);
+            panic!("{}", err);
+        }
+    }
 }
 
 pub fn count_rows(connection: &ConnectionWithFullMutex) -> i64 {

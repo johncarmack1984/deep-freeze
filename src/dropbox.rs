@@ -61,7 +61,7 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
 
 #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
-    print!("\n\n🗄️  Getting file list...\n");
+    print!("🗄️  Getting file list...\n");
     let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");

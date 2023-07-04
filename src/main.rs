@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 mod auth;
 mod aws;
 mod db;
@@ -46,15 +48,16 @@ struct Args {
 
 #[tokio::main]
 async fn main() {
+    print!("\n🧊🧊🧊 Deep Freeze - Migrate Files to S3 Deep Archive 🧊🧊🧊\n\n");
     init(Args::parse()).await;
 
     let http: HTTPClient = http::new_client();
-    auth::check_account(&http).await;
     let sqlite: DBConnection = db::connect(
         std::env::var("DBFILE")
             .unwrap_or("db.sqlite".to_string())
             .as_str(),
     );
+    auth::check_account(&http, &sqlite).await;
     dropbox::get_paths(&http, &sqlite).await;
     let aws: AWSClient = aws::new_client().await;
     match deepfreeze::perform_migration(http, sqlite, aws).await {
@@ -71,12 +74,12 @@ async fn main() {
 
 async fn init(args: Args) {
     dotenv().ok();
-    setenv("SILENT", args.silent.to_string()).unwrap();
+    setenv("SILENT", args.silent.to_string());
     if env::var("SILENT").unwrap() == "true" {
         println!("🔇 Running in silent mode...");
     }
-    setenv("RESET", args.reset.to_string()).unwrap();
-    setenv("RESET_ONLY", args.reset_only.to_string()).unwrap();
+    setenv("RESET", args.reset.to_string());
+    setenv("RESET_ONLY", args.reset_only.to_string());
     ::std::env::set_var("E2E", args.e2e.to_string());
     if env::var("E2E").unwrap() == "true" {
         ::std::env::set_var("DBFILE", "test/db.sqlite");

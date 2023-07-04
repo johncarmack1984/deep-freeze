@@ -1,8 +1,8 @@
 use sedregex::find_and_replace;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::{env, fs::File, path::Path};
 
-pub fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>> {
+pub fn setenv(key: &str, value: String) {
     let envpath = Path::new(".env");
     let mut src = File::open(envpath).unwrap();
     let mut data = String::new();
@@ -14,7 +14,6 @@ pub fn setenv(key: &str, value: String) -> Result<(), Box<dyn std::error::Error>
     dst.write_all(newenv.as_bytes()).unwrap();
     env::set_var(key, value.clone());
     assert_eq!(env::var(key).unwrap(), value);
-    Ok(())
 }
 
 pub fn standardize_path(old_path: &str) -> String {
@@ -34,4 +33,12 @@ pub fn standardize_path(old_path: &str) -> String {
     .to_string();
 
     path.to_string()
+}
+
+pub fn prompt(msg: &str) -> String {
+    eprint!("{}: ", msg);
+    io::stderr().flush().unwrap();
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
+    input.trim().to_owned()
 }
