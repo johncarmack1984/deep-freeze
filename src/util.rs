@@ -13,6 +13,7 @@ pub fn setenv(key: &str, value: String) {
     let mut dst = File::create(envpath).unwrap();
     dst.write_all(newenv.as_bytes()).unwrap();
     env::set_var(key, value.clone());
+    dotenv::dotenv().ok();
     assert_eq!(env::var(key).unwrap(), value);
 }
 
