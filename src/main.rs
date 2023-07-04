@@ -2,6 +2,7 @@
 
 mod auth;
 mod aws;
+mod cli;
 mod db;
 mod deepfreeze;
 mod dropbox;
@@ -23,6 +24,9 @@ use util::setenv;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
+    /// Dropbox access token
+    #[arg(short = 'a', long, default_value = "")]
+    access_token: String,
     /// Path to the sqlite database file
     #[arg(short, long, default_value = "db.sqlite")]
     dbfile: String,
@@ -42,7 +46,7 @@ struct Args {
     #[arg(short = 'k', long)]
     skip: Vec<String>,
     /// Path to the temp directory
-    #[arg(short, long, default_value = "temp")]
+    #[arg(short = 't', long, default_value = "temp")]
     temp_dir: String,
 }
 
@@ -78,13 +82,13 @@ async fn init(args: Args) {
     if env::var("SILENT").unwrap() == "true" {
         println!("🔇 Running in silent mode...");
     }
+
     setenv("RESET", args.reset.to_string());
     setenv("RESET_ONLY", args.reset_only.to_string());
     ::std::env::set_var("E2E", args.e2e.to_string());
     if env::var("E2E").unwrap() == "true" {
         ::std::env::set_var("DBFILE", "test/db.sqlite");
         ::std::env::set_var("TEMP_DIR", "test");
-        ::std::env::set_var("SILENT", "false");
         ::std::env::set_var("RESET", "true");
         ::std::env::set_var("BASE_FOLDER", "/deep-freeze-test");
         ::std::env::set_var("S3_BUCKET", "deep-freeze-test");
@@ -95,8 +99,10 @@ async fn init(args: Args) {
         if env::var("RESET_ONLY").unwrap() == "true" {
             println!("👌  Reset only");
             println!("✅  Exiting");
-            ::std::process::exit(0)
         }
+    }
+    if !args.access_token.is_empty() {
+        setenv("DROPBOX_ACCESS_TOKEN", args.access_token);
     }
 }
 

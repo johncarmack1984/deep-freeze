@@ -9,6 +9,7 @@ use std::io::{self, Write};
 async fn login(http: &HTTPClient) -> String {
     println!("🔒 Initiating login...");
     get_authorization_code().await;
+    dotenv::dotenv().ok();
     println!("🔐 Requesting access token...");
     let mut headers = HeaderMap::new();
     headers = http::dropbox_content_type_x_www_form_urlencoded_header(&mut headers);
@@ -127,6 +128,9 @@ async fn handle_auth_error(http: &HTTPClient, res: String) -> String {
 }
 
 pub async fn check_account(http: &HTTPClient, sqlite: &DBConnection) {
+    if !env::var("REFRESH_TOKEN").is_ok() {
+        login(http).await;
+    }
     print!("\n🪪  Checking account...\n");
     let res = get_current_account(&http).await;
     let json = json::from_res(&res);

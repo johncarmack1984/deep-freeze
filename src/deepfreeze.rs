@@ -17,7 +17,7 @@ pub async fn perform_migration(
     print!("\n🧊  Performing migration...\n\n\n\n");
     let m = progress::new_multi_progress();
     for row in sqlite
-        .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
+        .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_size ASC")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())

@@ -1,5 +1,6 @@
 paths.txt
 .env
+.env.temp
 /target
 db.sqlite*
 .dev

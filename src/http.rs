@@ -3,6 +3,8 @@ use std::env;
 pub type HTTPClient = reqwest::Client;
 pub type HeaderMap = reqwest::header::HeaderMap;
 
+const APP_KEY: &str = "5mmsu1p6otobzgk";
+
 pub fn new_client() -> HTTPClient {
     HTTPClient::builder().build().unwrap()
 }
@@ -40,28 +42,24 @@ pub fn dropbox_content_type_x_www_form_urlencoded_header(headers: &mut HeaderMap
 
 pub fn dropbox_refresh_token_body() -> String {
     let refresh_token = env::var("DROPBOX_REFRESH_TOKEN").unwrap();
-    let app_key = env::var("APP_KEY").unwrap();
     let app_secret = env::var("APP_SECRET").unwrap();
     format!(
         "refresh_token={}&grant_type=refresh_token&client_id={}&client_secret={}",
-        refresh_token, app_key, app_secret
+        refresh_token, APP_KEY, app_secret
     )
 }
 
 pub fn dropbox_oauth2_token_body() -> String {
     let authorization_code = env::var("DROPBOX_AUTHORIZATION_CODE").unwrap();
-    let app_key = env::var("APP_KEY").unwrap();
     let app_secret = env::var("APP_SECRET").unwrap();
     format!(
         "code={}&grant_type=authorization_code&client_id={}&client_secret={}",
-        authorization_code, app_key, app_secret
+        authorization_code, APP_KEY, app_secret
     )
 }
 
 pub fn dropbox_authorization_code_url() -> String {
-    let app_key = env::var("APP_KEY").unwrap();
     format!(
-        "https://www.dropbox.com/oauth2/authorize?client_id={}&token_access_type=offline&response_type=code",
-        app_key
+        "https://www.dropbox.com/oauth2/authorize?client_id={APP_KEY}&token_access_type=offline&response_type=code" 
     )
 }

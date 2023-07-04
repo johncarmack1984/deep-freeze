@@ -4,6 +4,14 @@ use std::{
     path::Path,
 };
 
+pub fn get_local_file(local_path: &str) -> File {
+    if local_file_exists(&local_path) {
+        File::open(&local_path).unwrap()
+    } else {
+        create_local_file(local_path)
+    }
+}
+
 pub fn local_file_exists(local_path: &str) -> bool {
     let path = Path::new(local_path);
     path.exists()

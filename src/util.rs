@@ -1,18 +1,36 @@
 use sedregex::find_and_replace;
 use std::io::{self, Read, Write};
-use std::{env, fs::File, path::Path};
+use std::{env, fs, fs::File, path::Path};
+
+use crate::localfs::get_local_file;
 
 pub fn setenv(key: &str, value: String) {
     let envpath = Path::new(".env");
-    let mut src = File::open(envpath).unwrap();
+    let envtemp = Path::new(".env.temp");
+    let mut src = get_local_file(envpath.to_str().unwrap());
     let mut data = String::new();
     src.read_to_string(&mut data).unwrap();
-    drop(src);
-    let regex = format!("s/{}=.*/{}={}/g", key, key, value);
-    let newenv = find_and_replace(&data, &[regex]).unwrap();
-    let mut dst = File::create(envpath).unwrap();
+    let mut newenv: String;
+    match data.contains(key) {
+        true => {
+            newenv = data
+                .lines()
+                .map(|line| match line.starts_with(format!("{key}=").as_str()) {
+                    true => format!("{}=\"{}\"", key, value),
+                    false => line.to_string(),
+                })
+                .collect::<Vec<String>>()
+                .join("\n");
+        }
+        false => {
+            data.push_str(format!("\n{}=\"{}\"", key, value).as_str());
+            newenv = data;
+        }
+    }
+    newenv.push_str("\n");
+    let mut dst = File::create(envtemp).unwrap();
     dst.write_all(newenv.as_bytes()).unwrap();
-    env::set_var(key, value.clone());
+    fs::rename(envtemp, envpath).unwrap();
     dotenv::dotenv().ok();
     assert_eq!(env::var(key).unwrap(), value);
 }
