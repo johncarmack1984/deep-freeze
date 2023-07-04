@@ -132,9 +132,9 @@ async fn migrate_file_to_s3(
         .to_string();
 
     match check_migration_status(&aws, &sqlite, &row).await {
-        0 => println!("❌  Not migrated"),
+        0 => (),
         1 => {
-            println!("✅ Already migrated");
+            println!("🪺 Already migrated");
             return Ok(());
         }
         err => {
@@ -168,7 +168,7 @@ async fn migrate_file_to_s3(
     // TODO create checksum from file for AWS
 
     match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_id, &key).await {
-        Ok(_) => println!("✅ File uploaded to S3"),
+        Ok(_) => (),
         Err(err) => {
             println!("🚫  {err}");
             db::set_unmigrated(&sqlite, &dropbox_id);
@@ -198,7 +198,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         .try_read::<&str, &str>("dropbox_id")
         .unwrap()
         .to_string();
-    println!("📂  Checking migration status for {}", dropbox_path);
+    println!("🔍  Checking migration status for {}", dropbox_path);
     match aws::get_s3_attrs(&aws, &bucket, &key).await {
         Err(err) => match err {
             AWSError::NoSuchKey(_) => {

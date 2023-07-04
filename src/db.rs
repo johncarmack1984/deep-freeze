@@ -203,7 +203,7 @@ pub fn set_unmigrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     match connection.execute(format!(
         "UPDATE paths SET migrated = 0 WHERE dropbox_id = '{dropbox_id}';",
     )) {
-        Ok(_) => println!("🪹   Not migrated: {dropbox_id}"),
+        Ok(_) => println!("🪹  Not migrated: {dropbox_id}"),
         Err(err) => panic!("❌  {err}"),
     }
 }
