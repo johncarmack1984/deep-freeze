@@ -152,19 +152,16 @@ pub async fn singlepart_upload(
             panic!("Could not open sample file: {}", e);
         })
         .unwrap();
-    let pb = m.add(crate::progress::new(
-        body.content_length() as u64,
-        "file_transfer",
-    ));
+    let pb = crate::progress::new(body.content_length() as u64, "file_transfer");
+    pb.set_prefix("⬆️  Upload   ");
     body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
         let percent = (sent as f64 / tot_size as f64) * 100.0;
         let msg = format!("⬆️  {:.1}% uploaded.", percent);
-        pb.set_message(msg);
+        // pb.set_message(msg);
         pb.inc(cur_buf as u64);
         if sent == tot_size {
-            pb.finish_with_message(format!("⬆️  Finished uploading"));
-            // pb.set_message(format!("⬆️  Finished uploading"));
-            // pb.finish_and_clear();
+            pb.set_prefix("✅  Upload   ");
+            pb.finish();
         }
     });
     client
@@ -188,7 +185,7 @@ pub async fn upload_to_s3(
     m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     match localfs::get_local_size(&local_path) {
-        0 => panic!("file has no size"),
+        // 0 => panic!("file has no size"),
         size if size >= MAX_UPLOAD_SIZE as i64 => panic!("file is too big"),
         size if size < MAX_CHUNK_SIZE as i64 => {
             singlepart_upload(&client, &key, &local_path, &bucket, &m).await

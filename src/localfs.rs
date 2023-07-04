@@ -34,7 +34,9 @@ pub fn get_local_size(local_path: &str) -> i64 {
 }
 
 pub fn delete_local_file(local_path: &str) -> () {
-    fs::remove_file(&local_path).unwrap();
+    if local_file_exists(local_path) {
+        fs::remove_file(&local_path).unwrap();
+    }
 }
 
 pub fn reset() {

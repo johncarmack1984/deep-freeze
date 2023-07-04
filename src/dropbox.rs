@@ -132,20 +132,19 @@ pub async fn download_from_dropbox(
     let mut file;
     let mut downloaded: u64 = 0;
     let pb = m.add(crate::progress::new(dropbox_size as u64, "file_transfer"));
+    pb.set_prefix("⬇️  Downloading ");
     file = create_local_file(&local_path);
-    pb.set_message(format!("⬇️ Downloading {dropbox_id}"));
     while let Some(item) = stream.next().await {
         let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
         let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
         downloaded = new;
         let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
         pb.set_position(downloaded);
-        pb.set_message(format!("⬇️ ({percent:.2}%) downloaded.", percent = percent,));
         file.write(&chunk)
             .or(Err(format!("❌  Error while writing to file")))?;
     }
-    let finished_msg = format!("⬇️  Finished downloading {dropbox_id}");
-    pb.finish_with_message(finished_msg);
+    pb.finish();
+    pb.set_prefix("✅  Download ");
     // pb.finish_and_clear();
     Ok(())
 }

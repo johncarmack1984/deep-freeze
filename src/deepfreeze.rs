@@ -81,7 +81,7 @@ pub async fn perform_migration(
     // pb_macro.set_position(db::count_migrated(&sqlite) as u64);
 
     for row in sqlite
-        .prepare("SELECT * FROM paths WHERE migrated < 1")
+        .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path DESC")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
@@ -134,7 +134,7 @@ async fn migrate_file_to_s3(
     match check_migration_status(&aws, &sqlite, &row).await {
         0 => (),
         1 => {
-            println!("🪺 Already migrated");
+            println!("🪺  Already migrated");
             return Ok(());
         }
         err => {
@@ -183,6 +183,7 @@ async fn migrate_file_to_s3(
     // TODO verify checksum from S3
 
     db::set_migrated(&sqlite, &dropbox_id);
+    localfs::delete_local_file(&local_path);
     return Ok(());
 }
 
@@ -198,6 +199,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         .try_read::<&str, &str>("dropbox_id")
         .unwrap()
         .to_string();
+    let local_path = format!("./temp/{key}");
     println!("🔍  Checking migration status for {}", dropbox_path);
     match aws::get_s3_attrs(&aws, &bucket, &key).await {
         Err(err) => match err {
@@ -210,12 +212,13 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         },
         Ok(s3_attrs) => match s3_attrs.object_size() == dropbox_size {
             true => {
-                println!("✅ Files the same size on DB & S3");
+                println!("✅  Files the same size on DB & S3");
                 db::set_migrated(&sqlite, &dropbox_id);
+                localfs::delete_local_file(&local_path);
                 1
             }
             false => {
-                println!("❌ File exists on S3, but is not the correct size");
+                println!("❌  File exists on S3, but is not the correct size");
                 println!("🗳️  DB size: {dropbox_size}");
                 println!("🗂️  S3 size: {}", s3_attrs.object_size());
                 aws::delete_from_s3(&aws, &bucket, &key).await.unwrap();

@@ -132,7 +132,7 @@ pub async fn check_account(http: &HTTPClient, sqlite: &DBConnection) {
     let json = json::from_res(&res);
     db::insert_user(sqlite, &json);
     print!(
-        "👤 Logged in as {}\n\n",
+        "👤  Logged in as {}\n\n",
         &json.get("email").unwrap().as_str().unwrap()
     );
 }

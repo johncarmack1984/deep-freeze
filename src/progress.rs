@@ -32,7 +32,7 @@ pub fn new(total: u64, style: &str) -> Progress {
 
 pub fn set_style_file_transfer_units(pb: Progress) -> Progress {
     pb.set_style(ProgressStyle::default_bar()
-            .template("{msg}\n{spinner:.green}  [{elapsed_precise}] [{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
+            .template("{prefix}{percent}% [{elapsed_precise}]{spinner:.green}[{wide_bar:.white/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})\n")
             .unwrap()
             .progress_chars("█  "));
     pb
