@@ -51,27 +51,12 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 dropbox_size INTEGER NOT NULL,
                 dropbox_hash TEXT NOT NULL,
                 migrated INTEGER NOT NULL DEFAULT -1,
+                skip INTEGER NOT NULL DEFAULT 0,
                 local_path TEXT UNIQUE DEFAULT NULL,
                 local_size INTEGER DEFAULT NULL,
                 s3_key TEXT UNIQUE DEFAULT NULL,
                 s3_size INTEGER DEFAULT NULL,
-                s3_hash TEXT UNIQUE DEFAULT NULL,
-                skip INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS user (
-                dropbox_user_id TEXT NOT NULL,
-                dropbox_refresh_token TEXT NOT NULL,
-                dropbox_access_token TEXT NOT NULL,
-                dropbox_authorization_code TEXT NOT NULL,
-                aws_access_key_id TEXT NOT NULL,
-                aws_secret_key TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS config (
-                dropbox_app_key TEXT NOT NULL,
-                dropbox_app_secret TEXT NOT NULL,
-                dropbox_base_folder TEXT NOT NULL,
-                s3_bucket TEXT NOT NULL,
-                aws_region TEXT NOT NULL
+                s3_hash TEXT UNIQUE DEFAULT NULL
             );
             ",
     ) {
@@ -231,3 +216,19 @@ pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) 
 //         .map(|row| row.unwrap())
 //         .collect::<Vec<_>>()
 // }
+
+// CREATE TABLE IF NOT EXISTS user (
+//     dropbox_user_id TEXT NOT NULL,
+//     dropbox_refresh_token TEXT NOT NULL,
+//     dropbox_access_token TEXT NOT NULL,
+//     dropbox_authorization_code TEXT NOT NULL,
+//     aws_access_key_id TEXT NOT NULL,
+//     aws_secret_key TEXT NOT NULL
+// );
+// CREATE TABLE IF NOT EXISTS config (
+//     dropbox_app_key TEXT NOT NULL,
+//     dropbox_app_secret TEXT NOT NULL,
+//     dropbox_base_folder TEXT NOT NULL,
+//     s3_bucket TEXT NOT NULL,
+//     aws_region TEXT NOT NULL
+// );

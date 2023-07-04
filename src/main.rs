@@ -1,3 +1,4 @@
+#![allow(unused)]
 mod auth;
 mod aws;
 mod db;
@@ -50,14 +51,13 @@ async fn main() {
 
     let http: HTTPClient = http::new_client();
     auth::check_account(&http).await;
-    let sqlite: DBConnection = db::connect(
+    let mut sqlite: DBConnection = db::connect(
         std::env::var("DBFILE")
             .unwrap_or("db.sqlite".to_string())
             .as_str(),
     );
     dropbox::get_paths(&http, &sqlite).await;
-    let aws: AWSClient = aws::new_client().await;
-    match deepfreeze::perform_migration(http, sqlite, aws).await {
+    match deepfreeze::perform_migration(http, &mut sqlite).await {
         Ok(_) => {
             println!("✅ Migration complete");
             ::std::process::exit(0)
