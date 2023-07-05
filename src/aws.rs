@@ -1,3 +1,5 @@
+use crate::db::DBConnection;
+use crate::util::setenv;
 use crate::{db, localfs, progress};
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::SdkConfig;
@@ -11,6 +13,7 @@ use aws_sdk_s3::operation::create_multipart_upload::{
 };
 use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
+use aws_sdk_s3::operation::list_buckets::{ListBucketsError, ListBucketsOutput};
 use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
 use aws_sdk_s3::operation::upload_part::{UploadPartError, UploadPartOutput};
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
@@ -61,6 +64,39 @@ pub async fn get_app_secret() -> &'static str {
 pub async fn new_client() -> Client {
     let sdk_config: SdkConfig = new_config().await;
     Client::new(&sdk_config)
+}
+
+pub async fn list_buckets(
+    client: &Client,
+) -> Result<ListBucketsOutput, SdkError<ListBucketsError>> {
+    match client.list_buckets().send().await {
+        Ok(res) => Ok(res),
+        Err(err) => Err(err),
+    }
+}
+
+pub async fn choose_bucket(client: &Client, sqlite: &DBConnection) {
+    let buckets = list_buckets(&client).await.unwrap();
+    let bucket_names = buckets
+        .buckets
+        .unwrap()
+        .iter()
+        .map(|b| b.name.as_ref().unwrap().to_string())
+        .collect::<Vec<String>>();
+    match inquire::Select::new(
+        "🗄️  Which S3 Bucket shall we freeze your files in?",
+        bucket_names,
+    )
+    .with_page_size(20)
+    .prompt()
+    {
+        Ok(choice) => {
+            println!("🗄️  You chose {choice}");
+            setenv("AWS_S3_BUCKET", choice);
+            db::insert_config(&sqlite);
+        }
+        Err(err) => panic!("❌  Error choosing folder {err}"),
+    }
 }
 
 pub async fn get_s3_attrs(

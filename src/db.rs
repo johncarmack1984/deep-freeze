@@ -77,11 +77,9 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 aws_secret_access_key TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS config (
-                dropbox_app_key TEXT NOT NULL,
-                dropbox_app_secret TEXT NOT NULL,
                 dropbox_base_folder TEXT NOT NULL,
-                s3_bucket TEXT NOT NULL,
-                aws_region TEXT NOT NULL
+                s3_bucket TEXT,
+                aws_region TEXT
             );
             ",
     ) {
@@ -135,6 +133,23 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .to_owned()
 }
 
+pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
+    let dropbox_base_folder = env::var("DROPBOX_BASE_FOLDER").unwrap_or(String::new());
+    let s3_bucket = env::var("S3_BUCKET").unwrap_or(String::new());
+    let aws_region = env::var("AWS_REGION").unwrap_or(String::new());
+    let statement = format!(
+        "INSERT OR REPLACE INTO config (dropbox_base_folder, s3_bucket, aws_region) VALUES ('{}', '{}', '{}');",
+        dropbox_base_folder, s3_bucket, aws_region
+    );
+    match sqlite::open("db.sqlite").unwrap().execute(&statement) {
+        Ok(_) => println!("📁  Config updated"),
+        Err(err) => {
+            println!("❌  Error in statement: {statement}");
+            panic!("{}", err);
+        }
+    }
+}
+
 pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
     let dropbox_user_id = member.get("account_id").unwrap().as_str().unwrap();
     let dropbox_team_member_id = member.get("team_member_id").unwrap().as_str().unwrap();
@@ -159,6 +174,10 @@ pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
         .unwrap_or(&default)
         .as_str()
         .unwrap_or("0");
+    setenv(
+        "DROPBOX_HOME_NAMESPACE_ID",
+        dropbox_home_namespace_id.to_string(),
+    );
     let dropbox_refresh_token = env::var("DROPBOX_REFRESH_TOKEN").unwrap_or(String::new());
     let dropbox_access_token = env::var("DROPBOX_ACCESS_TOKEN").unwrap_or(String::new());
     let dropbox_authorization_code =

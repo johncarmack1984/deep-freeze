@@ -42,6 +42,10 @@ struct Args {
     /// Reset the database and temp files, then exit
     #[arg(short = 'R', long, default_value = "false")]
     reset_only: bool,
+
+    /// Define the S3 folder to use
+    #[arg(short = '3', long, default_value = "")]
+    s3_bucket: String,
     /// Run in silent mode
     #[arg(short, long, default_value = "false")]
     silent: bool,
@@ -59,9 +63,7 @@ async fn main() {
     let (database, http, aws) = init(Args::parse()).await;
 
     auth::check_account(&http, &database).await;
-    std::process::exit(0);
     dropbox::get_paths(&http, &database).await;
-
     match deepfreeze::perform_migration(http, database, aws).await {
         Ok(_) => {
             println!("✅ Migration complete");
@@ -105,8 +107,8 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
         env::set_var("TEMP_DIR", "test");
         env::set_var("SILENT", "false");
         env::set_var("RESET", "true");
-        env::set_var("BASE_FOLDER", "/deep-freeze-test");
-        env::set_var("S3_BUCKET", "deep-freeze-test");
+        env::set_var("DROPBOX_BASE_FOLDER", "/deep-freeze-test");
+        env::set_var("AWS_S3_BUCKET", "deep-freeze-test");
         env::set_var("RUST_BACKTRACE", "1");
     }
     if env::var("RESET").unwrap() == "true" || env::var("RESET_ONLY").unwrap() == "true" {
@@ -123,6 +125,24 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     let database: DBConnection = db::connect(getenv("DBFILE").as_str());
     let http: HTTPClient = http::new_client();
     let aws: AWSClient = aws::new_client().await;
+    if env::var("AWS_ACCESS_KEY_ID").is_err() {
+        let aws_access_key_id = util::prompt("📦  AWS access key ID");
+        setenv("AWS_ACCESS_KEY_ID", aws_access_key_id);
+    }
+    if env::var("AWS_SECRET_ACCESS_KEY").is_err() {
+        let aws_secret_access_key = util::prompt("📦  AWS secret access key");
+        setenv("AWS_SECRET_ACCESS_KEY", aws_secret_access_key);
+    }
+    if env::var("AWS_REGION").is_err() {
+        let aws_region = util::prompt("📦  AWS region");
+        setenv("AWS_REGION", aws_region);
+    }
+    if args.s3_bucket != "" {
+        setenv("AWS_S3_BUCKET", args.s3_bucket);
+    }
+    if env::var("AWS_S3_BUCKET").is_err() {
+        aws::choose_bucket(&aws, &database).await;
+    }
     (database, http, aws)
 }
 

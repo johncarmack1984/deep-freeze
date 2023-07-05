@@ -77,7 +77,7 @@ async fn migrate_file_to_s3(
         .unwrap()
         .to_string();
     let key = util::standardize_path(&dropbox_path);
-    let bucket = env::var("S3_BUCKET").unwrap();
+    let bucket = env::var("AWS_S3_BUCKET").unwrap();
 
     println!("📂  Migrating {key}");
 
@@ -126,7 +126,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         .try_read::<&str, &str>("dropbox_path")
         .unwrap()
         .to_string();
-    let bucket = env::var("S3_BUCKET").unwrap();
+    let bucket = env::var("AWS_S3_BUCKET").unwrap();
     let key = util::standardize_path(&dropbox_path);
     let dropbox_size = row.try_read::<i64, &str>("dropbox_size").unwrap();
     let dropbox_id = row

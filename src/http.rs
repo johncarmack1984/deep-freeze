@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::util::getenv;
+
 pub type HTTPClient = reqwest::Client;
 pub type HeaderMap = reqwest::header::HeaderMap;
 
@@ -14,6 +16,22 @@ pub fn dropbox_authorization_header(headers: &mut HeaderMap) -> HeaderMap {
     headers.insert(
         "Authorization",
         format!("Bearer {}", access_token).parse().unwrap(),
+    );
+    headers.to_owned()
+}
+
+pub fn dropbox_api_path_root_header(headers: &mut HeaderMap) -> HeaderMap {
+    // val: format!("{{\".tag\": \"root\"}}").parse().unwrap()
+    let root_namespace_id = getenv("DROPBOX_ROOT_NAMESPACE_ID");
+    let home_namespace_id = getenv("DROPBOX_HOME_NAMESPACE_ID");
+    headers.insert(
+        "Dropbox-API-Path-Root",
+        format!(
+            "{{\".tag\": \"namespace_id\", \"namespace_id\": \"{}\"}}",
+            home_namespace_id
+        )
+        .parse()
+        .unwrap(),
     );
     headers.to_owned()
 }

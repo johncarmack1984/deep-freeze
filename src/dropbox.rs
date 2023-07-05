@@ -8,12 +8,17 @@ use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json::{self, JSON};
 use crate::localfs::{self, create_local_file, local_file_exists};
 use crate::progress;
+use crate::util::{getenv, setenv};
 
 pub async fn add_files_to_list(
     json: &JSON,
     connection: &DBConnection,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    assert_eq!(json.get("error"), None, "🛑 DropBox returned an error");
+    assert_eq!(
+        json.get("error"),
+        None,
+        "🛑 DropBox returned an error {json}"
+    );
     let count: usize = json::count_files(&json);
     println!("🗄️  {count} files found");
     if count > 0 {
@@ -25,7 +30,6 @@ pub async fn add_files_to_list(
 pub async fn get_team_members_list(http: &HTTPClient) -> String {
     let mut headers = HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
-    // headers = http::dropbox_select_admin_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
     let body = format!("{{\"limit\": 1000}}");
     http.post("https://api.dropboxapi.com/2/team/members/list_v2")
@@ -39,15 +43,17 @@ pub async fn get_team_members_list(http: &HTTPClient) -> String {
         .unwrap()
 }
 
-async fn list_folder(http: &HTTPClient) -> String {
-    let base_folder = env::var("BASE_FOLDER").unwrap();
+async fn list_folder(http: &HTTPClient, recursive: bool) -> String {
+    // let base_folder = env::var("BASE_FOLDER").unwrap();
+    // "{{\"path\": \"{}\", \"recursive\": true,  \"limit\": 2000, \"include_non_downloadable_files\": false}}",
     let mut headers = HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
+    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_api_path_root_header(&mut headers);
     let body = format!(
-        "{{\"path\": \"{}\", \"recursive\": true,  \"limit\": 2000, \"include_non_downloadable_files\": false}}",
-        base_folder
+        "{{\"path\": \"{}\", \"recursive\": {},  \"limit\": 2000, \"include_non_downloadable_files\": false}}",
+        env::var("DROPBOX_BASE_FOLDER").unwrap_or("".to_string()), recursive
     );
     http.post("https://api.dropboxapi.com/2/files/list_folder")
         .headers(headers)
@@ -65,6 +71,7 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
     headers = http::dropbox_authorization_header(&mut headers);
     headers = http::dropbox_select_admin_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
+    headers = http::dropbox_api_path_root_header(&mut headers);
     let body = format!("{{\"cursor\": {cursor}}}");
     http.post("https://api.dropboxapi.com/2/files/list_folder/continue")
         .headers(headers)
@@ -77,16 +84,46 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
         .unwrap()
 }
 
-#[async_recursion::async_recursion(?Send)]
+pub async fn choose_folder(http: &HTTPClient, sqlite: &DBConnection) {
+    let recursive = false;
+    let mut res = list_folder(&http, recursive).await;
+    let mut json: JSON = json::from_res(&res);
+    let folders = json.get("entries").unwrap().as_array().unwrap();
+    let options: Vec<String> = folders
+        .into_iter()
+        .map(|folder| {
+            let path = folder.get("path_display").unwrap().as_str().unwrap();
+            path.to_string()
+        })
+        .collect();
+    match inquire::Select::new("🗄️  Choose a folder to scan", options)
+        .with_page_size(20)
+        .prompt()
+    {
+        Ok(choice) => {
+            println!("🗄️  You chose {choice}");
+            setenv("DROPBOX_BASE_FOLDER", choice);
+            db::insert_config(&sqlite);
+        }
+        Err(err) => panic!("❌  Error choosing folder {err}"),
+    }
+}
+
+// #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
     print!("🗄️   Getting file list...\n");
     let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");
+        if dotenv::var("DROPBOX_BASE_FOLDER").is_err() {
+            choose_folder(http, sqlite).await;
+        }
         println!("🗄️  Populating file list...");
-        let mut res = list_folder(&http).await;
+        let recursive = true;
+        let mut res = list_folder(&http, recursive).await;
         let mut json: JSON = json::from_res(&res);
         add_files_to_list(&json, &sqlite).await.unwrap();
+
         let mut has_more = json::get_has_more(&json);
         let mut cursor: String;
         while has_more == true {
@@ -99,6 +136,7 @@ pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
             add_files_to_list(&json, &sqlite).await.unwrap();
             has_more = json::get_has_more(&json);
         }
+        print!("\n");
     }
     db::report_status(&sqlite).try_into().unwrap()
 }
@@ -114,8 +152,6 @@ pub async fn get_file_metadata(http: &HTTPClient, dropbox_path: &str) -> String 
         .body(body)
         .send()
         .await
-        // thread 'main' panicked at 'called `Result::unwrap()` on an `Err` value: reqwest::Error { kind: Request, url: Url { scheme: "https", cannot_be_a_base: false, username: "", password: None, host: Some(Domain("api.dropboxapi.com")), port: None, path: "/2/files/get_metadata", query: None, fragment: None }, source: hyper::Error(IncompleteMessage) }', src/dropbox.rs:99:10
-        // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
         .unwrap()
         .text()
         .await

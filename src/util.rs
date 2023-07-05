@@ -47,7 +47,7 @@ pub fn update_env_file(key: &str, value: String) {
 }
 
 pub fn standardize_path(old_path: &str) -> String {
-    let base_folder = env::var("BASE_FOLDER").unwrap();
+    let base_folder = env::var("DROPBOX_BASE_FOLDER").unwrap();
     let mut path = find_and_replace(
         &old_path.clone().to_owned(),
         &[format!("s/\\{}\\///g", base_folder)],
