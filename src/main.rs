@@ -17,7 +17,7 @@ use aws::AWSClient;
 use clap::Parser;
 use db::DBConnection;
 use http::HTTPClient;
-use std::env;
+use std::{env, process};
 use util::setenv;
 
 #[derive(Parser, Debug)]
@@ -26,6 +26,9 @@ struct Args {
     /// Path to the sqlite database file
     #[arg(short, long, default_value = "db.sqlite")]
     dbfile: String,
+    /// Path to the .env file
+    #[arg(short = 'v', long, default_value = ".env")]
+    env_file: String,
     /// Run the program end-to-end with test values
     #[arg(short, long, default_value = "false")]
     e2e: bool,
@@ -73,36 +76,53 @@ async fn main() {
 }
 
 async fn init(args: Args) {
-    dotenv().ok();
-    setenv("SILENT", args.silent.to_string());
+    setenv("ENV_FILE", args.env_file);
     if env::var("SILENT").unwrap() == "true" {
         println!("🔇 Running in silent mode...");
     }
+    setenv("SILENT", args.silent.to_string());
+    if args.skip.len() > 0 {
+        setenv("SKIP", args.skip.join(","));
+    }
+    if args.temp_dir != "temp" {
+        setenv("TEMP_DIR", args.temp_dir);
+    }
+    if env::var("TEMP_DIR").unwrap() != "temp" {
+        println!("📁 Using temp directory: {}", env::var("TEMP_DIR").unwrap());
+    }
+    if env::var("SKIP").unwrap() != "" {
+        println!("🚫 Skipping paths: {}", env::var("SKIP").unwrap());
+    }
+    if args.dbfile != "db.sqlite" {
+        println!("🗄️  Using database file: {}", args.dbfile);
+        setenv("DBFILE", args.dbfile);
+    }
     setenv("RESET", args.reset.to_string());
     setenv("RESET_ONLY", args.reset_only.to_string());
-    ::std::env::set_var("E2E", args.e2e.to_string());
-    if env::var("E2E").unwrap() == "true" {
-        ::std::env::set_var("DBFILE", "test/db.sqlite");
-        ::std::env::set_var("TEMP_DIR", "test");
-        ::std::env::set_var("SILENT", "false");
-        ::std::env::set_var("RESET", "true");
-        ::std::env::set_var("BASE_FOLDER", "/deep-freeze-test");
-        ::std::env::set_var("S3_BUCKET", "deep-freeze-test");
-        ::std::env::set_var("RUST_BACKTRACE", "1");
+    if args.e2e {
+        println!("🧪 Running end-to-end test");
+        env::set_var("E2E", args.e2e.to_string());
+        env::set_var("DBFILE", "test/db.sqlite");
+        env::set_var("TEMP_DIR", "test");
+        env::set_var("SILENT", "false");
+        env::set_var("RESET", "true");
+        env::set_var("BASE_FOLDER", "/deep-freeze-test");
+        env::set_var("S3_BUCKET", "deep-freeze-test");
+        env::set_var("RUST_BACKTRACE", "1");
     }
     if env::var("RESET").unwrap() == "true" || env::var("RESET_ONLY").unwrap() == "true" {
         reset().await;
         if env::var("RESET_ONLY").unwrap() == "true" {
             println!("👌  Reset only");
             println!("✅  Exiting");
-            ::std::process::exit(0)
+            process::exit(0)
         }
     }
 }
 
 async fn reset() {
     println!("🗑️  Resetting database and temp files");
-    db::reset(std::env::var("DBFILE").unwrap().as_str());
+    db::reset(env::var("DBFILE").unwrap().as_str());
     println!("🚮  Database reset");
     localfs::reset();
     println!("🚮  Temp files deleted");

@@ -6,7 +6,8 @@ use std::{env, error::Error};
 use crate::db::{self, DBConnection};
 use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json::{self, JSON};
-use crate::localfs::create_local_file;
+use crate::localfs::{self, create_local_file, local_file_exists};
+use crate::progress;
 
 pub async fn add_files_to_list(
     json: &JSON,
@@ -96,6 +97,8 @@ pub async fn get_file_metadata(http: &HTTPClient, dropbox_path: &str) -> String 
         .body(body)
         .send()
         .await
+        // thread 'main' panicked at 'called `Result::unwrap()` on an `Err` value: reqwest::Error { kind: Request, url: Url { scheme: "https", cannot_be_a_base: false, username: "", password: None, host: Some(Domain("api.dropboxapi.com")), port: None, path: "/2/files/get_metadata", query: None, fragment: None }, source: hyper::Error(IncompleteMessage) }', src/dropbox.rs:99:10
+        // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
         .unwrap()
         .text()
         .await
@@ -131,17 +134,20 @@ pub async fn download_from_dropbox(
     let mut stream = res.bytes_stream();
     let mut file;
     let mut downloaded: u64 = 0;
-    let pb = m.add(crate::progress::new(dropbox_size as u64, "file_transfer"));
+    let pb = m.add(progress::new(dropbox_size as u64, "file_transfer"));
     pb.set_prefix("⬇️   Download  ");
-    file = create_local_file(&local_path);
-    while let Some(item) = stream.next().await {
-        let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
-        let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
-        downloaded = new;
-        let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
-        pb.set_position(downloaded);
-        file.write(&chunk)
-            .or(Err(format!("❌  Error while writing to file")))?;
+    let local_file_exists = localfs::local_file_exists(&local_path.to_string());
+    if localfs::get_local_size(&local_path) != dropbox_size {
+        file = create_local_file(&local_path);
+        while let Some(item) = stream.next().await {
+            let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
+            let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
+            downloaded = new;
+            let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
+            pb.set_position(downloaded);
+            file.write(&chunk)
+                .or(Err(format!("❌  Error while writing to file")))?;
+        }
     }
     pb.finish();
     pb.set_prefix("✅  Download ");

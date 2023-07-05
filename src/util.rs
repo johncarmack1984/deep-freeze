@@ -3,7 +3,9 @@ use std::io::{self, Read, Write};
 use std::{env, fs::File, path::Path};
 
 pub fn setenv(key: &str, value: String) {
-    let envpath = Path::new(".env");
+    env::set_var(key, value.clone());
+    let envfile = env::var("ENV_FILE").unwrap();
+    let envpath = Path::new(&envfile);
     let mut src = File::open(envpath).unwrap();
     let mut data = String::new();
     src.read_to_string(&mut data).unwrap();
@@ -12,8 +14,7 @@ pub fn setenv(key: &str, value: String) {
     let newenv = find_and_replace(&data, &[regex]).unwrap();
     let mut dst = File::create(envpath).unwrap();
     dst.write_all(newenv.as_bytes()).unwrap();
-    env::set_var(key, value.clone());
-    dotenv::dotenv().ok();
+    dotenv::from_filename(&envfile).ok();
     assert_eq!(env::var(key).unwrap(), value);
 }
 
