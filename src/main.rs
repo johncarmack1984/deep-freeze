@@ -58,9 +58,10 @@ async fn main() {
     print!("\n🧊🧊🧊 Deep Freeze - Migrate Files to S3 Deep Archive 🧊🧊🧊\n\n");
     let (database, http, aws) = init(Args::parse()).await;
 
-    std::process::exit(0);
     auth::check_account(&http, &database).await;
+    std::process::exit(0);
     dropbox::get_paths(&http, &database).await;
+
     match deepfreeze::perform_migration(http, database, aws).await {
         Ok(_) => {
             println!("✅ Migration complete");

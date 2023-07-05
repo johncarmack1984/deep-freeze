@@ -15,21 +15,51 @@ use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
 use aws_sdk_s3::operation::upload_part::{UploadPartError, UploadPartOutput};
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
 use aws_sdk_s3::{Client, Error};
+use aws_sdk_secretsmanager::Client as SecretsClient;
 use aws_smithy_http::byte_stream::{ByteStream, Length};
 use aws_smithy_http::result::SdkError;
 use deep_freeze::{
     TrackableBodyStream, MAX_CHUNKS, MAX_CHUNK_SIZE, MAX_UPLOAD_SIZE, MIN_CHUNK_SIZE,
 };
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
 pub type AWSClient = Client;
 
-pub async fn new_client() -> Client {
+pub async fn new_config() -> SdkConfig {
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
         .or_else(Region::new("us-east-1"));
-    let sdk_config: SdkConfig = aws_config::from_env().region(region_provider).load().await;
+    aws_config::from_env().region(region_provider).load().await
+}
+
+pub async fn new_secrets_client() -> SecretsClient {
+    let sdk_config: SdkConfig = new_config().await;
+    SecretsClient::new(&sdk_config)
+}
+
+pub async fn get_app_secret() -> &'static str {
+    let secrets = crate::aws::new_secrets_client().await;
+    let resp = secrets
+        .get_secret_value()
+        .secret_id("DropboxAppSecret")
+        .send()
+        .await
+        .unwrap();
+    let secretstring = resp.secret_string().unwrap_or("No value!").to_string();
+    let secretjson = crate::json::from_res(&secretstring);
+    let app_secret = secretjson
+        .get("dropbox_app_secret")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    crate::util::coerce_static_str(app_secret)
+}
+
+pub async fn new_client() -> Client {
+    let sdk_config: SdkConfig = new_config().await;
     Client::new(&sdk_config)
 }
 

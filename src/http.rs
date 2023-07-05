@@ -49,9 +49,9 @@ pub fn dropbox_refresh_token_body() -> String {
     )
 }
 
-pub fn dropbox_oauth2_token_body() -> String {
+pub async fn dropbox_oauth2_token_body() -> String {
     let authorization_code = env::var("DROPBOX_AUTHORIZATION_CODE").unwrap();
-    let app_secret = env::var("APP_SECRET").unwrap();
+    let app_secret = crate::aws::get_app_secret().await;
     format!(
         "code={}&grant_type=authorization_code&client_id={}&client_secret={}",
         authorization_code, APP_KEY, app_secret

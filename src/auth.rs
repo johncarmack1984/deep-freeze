@@ -1,7 +1,7 @@
 use crate::db::{self, DBConnection};
 use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json::{self, JSON};
-use crate::util::{prompt, setenv};
+use crate::util::{getenv, prompt, setenv};
 use open;
 use std::env;
 use std::io::{self, Write};
@@ -9,11 +9,14 @@ use std::io::{self, Write};
 async fn login(http: &HTTPClient) -> String {
     println!("🔒 Initiating login...");
     get_authorization_code().await;
-    dotenv::dotenv().ok();
+    get_access_token(http).await
+}
+
+async fn get_access_token(http: &HTTPClient) -> String {
     println!("🔐 Requesting access token...");
     let mut headers = HeaderMap::new();
     headers = http::dropbox_content_type_x_www_form_urlencoded_header(&mut headers);
-    let body = http::dropbox_oauth2_token_body();
+    let body = http::dropbox_oauth2_token_body().await;
     match http
         .post("https://api.dropbox.com/oauth2/token")
         .headers(headers)
@@ -28,11 +31,11 @@ async fn login(http: &HTTPClient) -> String {
             true => handle_auth_error(&http, res).await,
             false => {
                 let json = json::from_res(&res);
-                let refresh_token = json.get("refresh_token").unwrap().to_string().to_owned();
-                let access_token = json.get("access_token").unwrap().to_string().to_owned();
-                setenv("REFRESH_TOKEN", refresh_token);
+                let refresh_token = json.get("refresh_token").unwrap().as_str().unwrap();
+                let access_token = json.get("access_token").unwrap().as_str().unwrap();
+                setenv("DROPBOX_REFRESH_TOKEN", refresh_token.to_string());
                 println!("🔑 Refresh token set");
-                setenv("ACCESS_TOKEN", access_token);
+                setenv("DROPBOX_ACCESS_TOKEN", access_token.to_string());
                 println!("🔑 Login: Access token set");
                 res
             }
@@ -49,7 +52,7 @@ async fn get_authorization_code() {
     print!("\n🌐 {}\n\n", url);
     println!("🔐 and authorize the app.");
     let authorization_code = prompt("🪪  Paste the authorization code you see here");
-    setenv("AUTHORIZATION_CODE", format!("\"{}\"", authorization_code));
+    setenv("DROPBOX_AUTHORIZATION_CODE", authorization_code);
     println!("🔑 Authorization code set");
 }
 
@@ -85,7 +88,7 @@ async fn refresh_token(http: &HTTPClient) -> String {
 async fn get_current_account(http: &HTTPClient) -> String {
     let mut headers = http::HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
+    // headers = http::dropbox_select_admin_header(&mut headers);
     match http
         .post("https://api.dropboxapi.com/2/users/get_current_account")
         .headers(headers)
@@ -130,7 +133,7 @@ async fn handle_auth_error(http: &HTTPClient, res: String) -> String {
 }
 
 pub async fn check_account(http: &HTTPClient, sqlite: &DBConnection) {
-    if !env::var("REFRESH_TOKEN").is_ok() {
+    if dotenv::var("REFRESH_TOKEN").is_err() {
         login(http).await;
     }
     print!("\n🪪  Checking account...\n");
@@ -141,4 +144,5 @@ pub async fn check_account(http: &HTTPClient, sqlite: &DBConnection) {
         "👤  Logged in as {}\n\n",
         &json.get("email").unwrap().as_str().unwrap()
     );
+    std::process::exit(0);
 }

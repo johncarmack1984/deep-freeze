@@ -72,3 +72,7 @@ pub fn prompt(msg: &str) -> String {
     io::stdin().read_line(&mut input).unwrap();
     input.trim().to_owned()
 }
+
+pub fn coerce_static_str(s: String) -> &'static str {
+    Box::leak(s.into_boxed_str())
+}
