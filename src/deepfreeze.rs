@@ -27,7 +27,7 @@ pub async fn perform_migration(
             .unwrap()
             .to_string();
         let filter = |&i| i == dropbox_id;
-        if env::var("SKIP_ARRAY")
+        if env::var("SKIP")
             .unwrap_or("".to_string())
             .split(',')
             .collect::<Vec<&str>>()
@@ -87,9 +87,15 @@ async fn migrate_file_to_s3(
         .await
         .unwrap();
 
-    aws::upload_to_s3(&aws, &key, &local_path, &bucket, &m)
-        .await
-        .unwrap();
+    match aws::upload_to_s3(&aws, &key, &local_path, &bucket, &m).await {
+        Ok(_) => (),
+        Err(err) => {
+            println!("🚫  {err}");
+            db::set_unmigrated(&sqlite, &dropbox_id);
+            localfs::delete_local_file(&local_path);
+            db::set_skip(&sqlite, &dropbox_id);
+        }
+    }
 
     // TODO verify checksum from DB
     // TODO create checksum from file for AWS

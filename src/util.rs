@@ -5,7 +5,9 @@ use std::{env, fs, fs::File, path::Path};
 use crate::localfs::get_local_file;
 
 pub fn setenv(key: &str, value: String) {
-    let envpath = Path::new(".env");
+    env::set_var(key, value.clone());
+    let envfile = env::var("ENV_FILE").unwrap();
+    let envpath = Path::new(&envfile);
     let envtemp = Path::new(".env.temp");
     let mut src = get_local_file(envpath.to_str().unwrap());
     let mut data = String::new();

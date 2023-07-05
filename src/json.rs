@@ -22,7 +22,14 @@ pub fn get_cursor(json: &Value) -> String {
 }
 
 pub fn get_size(json: &Value) -> i64 {
-    json.get("size").unwrap().as_i64().unwrap()
+    match json.get("size").unwrap().as_i64() {
+        Some(size) => size,
+        None => {
+            println!("Your access token is likely expired. Please run `deepfreeze` again, we'll get this handled automatically in a future release.");
+            // TODO call auth::refresh_token(), need way to get http client in this function without drilling it through all the way from main()
+            std::process::exit(1)
+        }
+    }
 }
 
 pub fn _get_id(json: &Value) -> String {

@@ -1,8 +1,9 @@
 paths.txt
 .env
 .env.temp
+.env.test.*
 /target
-db.sqlite*
+db.*
 .dev
 temp
 temp/**/*

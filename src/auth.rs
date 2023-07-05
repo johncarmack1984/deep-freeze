@@ -119,6 +119,8 @@ async fn handle_auth_error(http: &HTTPClient, res: String) -> String {
             println!("🚫  Access token expired");
             refresh_token(http).await
         }
+        //     📂  Migrating YouTube Channel/Archives/2020/11c Breadstream Highlights/Jonathan Folder/Assets/Video/B-Roll Original Footage/ATEM 2 Finished Loaf/Untitled CAM 1.mp4
+        // thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', src/json.rs:25:22
         "invalid_access_token" => {
             println!("🚫  Access token invalid");
             "error".to_string()
