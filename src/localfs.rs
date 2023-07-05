@@ -1,15 +1,17 @@
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::Write,
     path::Path,
 };
 
 pub fn get_local_file(local_path: &str) -> File {
-    if local_file_exists(&local_path) {
-        File::open(&local_path).unwrap()
-    } else {
-        create_local_file(local_path)
-    }
+    OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&local_path)
+        .unwrap()
 }
 
 pub fn local_file_exists(local_path: &str) -> bool {

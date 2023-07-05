@@ -6,10 +6,19 @@ use crate::localfs::get_local_file;
 
 pub fn setenv(key: &str, value: String) {
     env::set_var(key, value.clone());
-    let envfile = env::var("ENV_FILE").unwrap();
-    let envpath = Path::new(&envfile);
-    let envtemp = Path::new(".env.temp");
-    let mut src = get_local_file(envpath.to_str().unwrap());
+    update_env_file(key, value);
+}
+
+pub fn getenv(key: &str) -> String {
+    env::var(key).unwrap()
+}
+
+pub fn update_env_file(key: &str, value: String) {
+    let env_filename = env::var("ENV_FILE").unwrap();
+    let env_path = Path::new(&env_filename);
+    let env_temp_filename = format!("{env_filename}.temp", env_filename = &env_filename);
+    let env_temp_path = Path::new(&env_temp_filename);
+    let mut src = get_local_file(env_path.to_str().unwrap());
     let mut data = String::new();
     src.read_to_string(&mut data).unwrap();
     let mut newenv: String;
@@ -25,15 +34,15 @@ pub fn setenv(key: &str, value: String) {
                 .join("\n");
         }
         false => {
-            data.push_str(format!("\n{}=\"{}\"", key, value).as_str());
+            data.push_str(format!("{}=\"{}\"", key, value).as_str());
             newenv = data;
         }
     }
     newenv.push_str("\n");
-    let mut dst = File::create(envtemp).unwrap();
+    let mut dst = File::create(env_temp_path).unwrap();
     dst.write_all(newenv.as_bytes()).unwrap();
-    fs::rename(envtemp, envpath).unwrap();
-    dotenv::dotenv().ok();
+    fs::rename(env_temp_path, env_path).unwrap();
+    dotenv::from_filename(env_filename).ok();
     assert_eq!(env::var(key).unwrap(), value);
 }
 

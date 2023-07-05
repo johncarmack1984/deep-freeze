@@ -57,7 +57,7 @@ struct Args {
 async fn main() {
     print!("\n🧊🧊🧊 Deep Freeze - Migrate Files to S3 Deep Archive 🧊🧊🧊\n\n");
     init(Args::parse()).await;
-
+    std::process::exit(0);
     let http: HTTPClient = http::new_client();
     let sqlite: DBConnection = db::connect(
         std::env::var("DBFILE")
@@ -81,21 +81,21 @@ async fn main() {
 
 async fn init(args: Args) {
     setenv("ENV_FILE", args.env_file);
+    setenv("SILENT", args.silent.to_string());
     if env::var("SILENT").unwrap() == "true" {
         println!("🔇 Running in silent mode...");
     }
-    setenv("SILENT", args.silent.to_string());
-    if args.skip.len() > 0 {
+    if dotenv::var("SKIP").is_err() {
         setenv("SKIP", args.skip.join(","));
     }
-    if args.temp_dir != "temp" {
-        setenv("TEMP_DIR", args.temp_dir);
+    if env::var("SKIP").unwrap() == "" {
+        println!("🚫 Skipping no paths");
+    } else {
+        println!("🚫 Skipping paths: {}", env::var("SKIP").unwrap());
     }
+    setenv("TEMP_DIR", args.temp_dir);
     if env::var("TEMP_DIR").unwrap() != "temp" {
         println!("📁 Using temp directory: {}", env::var("TEMP_DIR").unwrap());
-    }
-    if env::var("SKIP").unwrap() != "" {
-        println!("🚫 Skipping paths: {}", env::var("SKIP").unwrap());
     }
     if args.dbfile != "db.sqlite" {
         println!("🗄️  Using database file: {}", args.dbfile);
