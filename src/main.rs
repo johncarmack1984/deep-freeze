@@ -19,7 +19,7 @@ use clap::Parser;
 use db::DBConnection;
 use http::HTTPClient;
 use std::{env, process};
-use util::setenv;
+use util::{getenv, setenv};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -56,18 +56,12 @@ struct Args {
 #[tokio::main]
 async fn main() {
     print!("\n🧊🧊🧊 Deep Freeze - Migrate Files to S3 Deep Archive 🧊🧊🧊\n\n");
-    init(Args::parse()).await;
+    let (database, http, aws) = init(Args::parse()).await;
+
     std::process::exit(0);
-    let http: HTTPClient = http::new_client();
-    let sqlite: DBConnection = db::connect(
-        std::env::var("DBFILE")
-            .unwrap_or("db.sqlite".to_string())
-            .as_str(),
-    );
-    auth::check_account(&http, &sqlite).await;
-    dropbox::get_paths(&http, &sqlite).await;
-    let aws: AWSClient = aws::new_client().await;
-    match deepfreeze::perform_migration(http, sqlite, aws).await {
+    auth::check_account(&http, &database).await;
+    dropbox::get_paths(&http, &database).await;
+    match deepfreeze::perform_migration(http, database, aws).await {
         Ok(_) => {
             println!("✅ Migration complete");
             ::std::process::exit(0)
@@ -79,7 +73,7 @@ async fn main() {
     }
 }
 
-async fn init(args: Args) {
+async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     setenv("ENV_FILE", args.env_file);
     setenv("SILENT", args.silent.to_string());
     if env::var("SILENT").unwrap() == "true" {
@@ -97,10 +91,10 @@ async fn init(args: Args) {
     if env::var("TEMP_DIR").unwrap() != "temp" {
         println!("📁 Using temp directory: {}", env::var("TEMP_DIR").unwrap());
     }
-    if args.dbfile != "db.sqlite" {
-        println!("🗄️  Using database file: {}", args.dbfile);
+    if dotenv::var("DBFILE").is_err() || args.dbfile != "db.sqlite" {
         setenv("DBFILE", args.dbfile);
     }
+    println!("🗄️  Using database file: {}", getenv("DBFILE"));
     setenv("RESET", args.reset.to_string());
     setenv("RESET_ONLY", args.reset_only.to_string());
     if args.e2e {
@@ -125,6 +119,10 @@ async fn init(args: Args) {
     if !args.access_token.is_empty() {
         setenv("DROPBOX_ACCESS_TOKEN", args.access_token);
     }
+    let database: DBConnection = db::connect(getenv("DBFILE").as_str());
+    let http: HTTPClient = http::new_client();
+    let aws: AWSClient = aws::new_client().await;
+    (database, http, aws)
 }
 
 async fn reset() {
