@@ -18,8 +18,17 @@ pub fn dropbox_authorization_header(headers: &mut HeaderMap) -> HeaderMap {
     headers.to_owned()
 }
 
+pub fn dropbox_select_user_header(headers: &mut HeaderMap) -> HeaderMap {
+    let team_member_id = ::std::env::var("DROPBOX_TEAM_MEMBER_ID").unwrap();
+    headers.insert(
+        "Dropbox-API-Select-User",
+        format!("{}", team_member_id).parse().unwrap(),
+    );
+    headers.to_owned()
+}
+
 pub fn dropbox_select_admin_header(headers: &mut HeaderMap) -> HeaderMap {
-    let team_member_id = ::std::env::var("TEAM_MEMBER_ID").unwrap();
+    let team_member_id = ::std::env::var("DROPBOX_TEAM_MEMBER_ID").unwrap();
     headers.insert(
         "Dropbox-API-Select-Admin",
         format!("{}", team_member_id).parse().unwrap(),

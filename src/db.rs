@@ -3,7 +3,7 @@ use std::env;
 use sedregex::find_and_replace;
 use sqlite::{self, ConnectionWithFullMutex};
 
-use crate::json::JSON;
+use crate::{json::JSON, util::setenv};
 
 pub type DBConnection = ConnectionWithFullMutex;
 pub type DBRow = sqlite::Row;
@@ -71,6 +71,8 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 dropbox_refresh_token TEXT NOT NULL,
                 dropbox_access_token TEXT NOT NULL,
                 dropbox_authorization_code TEXT NOT NULL,
+                dropbox_root_namespace_id STRING NOT NULL,
+                dropbox_home_namespace_id STRING NOT NULL,
                 aws_access_key_id TEXT NOT NULL,
                 aws_secret_access_key TEXT NOT NULL
             );
@@ -133,10 +135,30 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .to_owned()
 }
 
-pub fn insert_user(connection: &ConnectionWithFullMutex, json: &JSON) {
-    let dropbox_user_id = json.get("account_id").unwrap().as_str().unwrap();
-    let dropbox_team_member_id = json.get("team_member_id").unwrap().as_str().unwrap();
-    let dropbox_email = json.get("email").unwrap().as_str().unwrap();
+pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
+    let dropbox_user_id = member.get("account_id").unwrap().as_str().unwrap();
+    let dropbox_team_member_id = member.get("team_member_id").unwrap().as_str().unwrap();
+    setenv("DROPBOX_TEAM_MEMBER_ID", dropbox_team_member_id.to_string());
+    let dropbox_email = member.get("email").unwrap().as_str().unwrap();
+    let default = JSON::String("0".to_string());
+    let dropbox_root_namespace_id = member
+        .get("root_info")
+        .unwrap_or(&default)
+        .get("root_namespace_id")
+        .unwrap_or(&default)
+        .as_str()
+        .unwrap_or("0");
+    setenv(
+        "DROPBOX_ROOT_NAMESPACE_ID",
+        dropbox_root_namespace_id.to_string(),
+    );
+    let dropbox_home_namespace_id = member
+        .get("root_info")
+        .unwrap_or(&default)
+        .get("home_namespace_id")
+        .unwrap_or(&default)
+        .as_str()
+        .unwrap_or("0");
     let dropbox_refresh_token = env::var("DROPBOX_REFRESH_TOKEN").unwrap_or(String::new());
     let dropbox_access_token = env::var("DROPBOX_ACCESS_TOKEN").unwrap_or(String::new());
     let dropbox_authorization_code =
@@ -144,11 +166,14 @@ pub fn insert_user(connection: &ConnectionWithFullMutex, json: &JSON) {
     let aws_access_key_id = env::var("AWS_ACCESS_KEY_ID").unwrap_or(String::new());
     let aws_secret_access_key = env::var("AWS_SECRET_ACCESS_KEY").unwrap_or(String::new());
     let statement = format!(
-            "INSERT OR REPLACE INTO user (dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key) VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}');",
-            dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key
+            "INSERT OR REPLACE INTO user (dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_root_namespace_id, dropbox_home_namespace_id, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key) VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}','{}','{}');",
+            dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_root_namespace_id, dropbox_home_namespace_id, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key
         );
     match connection.execute(&statement) {
-        Ok(_) => (),
+        Ok(_) => {
+            println!("👤  User {dropbox_email} updated");
+            ()
+        }
         Err(err) => {
             print!("\n\n❌  Error in statement:\n\n{:?}\n\n", statement);
             panic!("{}", err);

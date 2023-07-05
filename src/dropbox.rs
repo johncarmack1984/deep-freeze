@@ -22,6 +22,23 @@ pub async fn add_files_to_list(
     Ok(())
 }
 
+pub async fn get_team_members_list(http: &HTTPClient) -> String {
+    let mut headers = HeaderMap::new();
+    headers = http::dropbox_authorization_header(&mut headers);
+    // headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_content_type_json_header(&mut headers);
+    let body = format!("{{\"limit\": 1000}}");
+    http.post("https://api.dropboxapi.com/2/team/members/list_v2")
+        .headers(headers)
+        .body(body)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap()
+}
+
 async fn list_folder(http: &HTTPClient) -> String {
     let base_folder = env::var("BASE_FOLDER").unwrap();
     let mut headers = HeaderMap::new();
@@ -151,7 +168,6 @@ pub async fn download_from_dropbox(
     }
     pb.finish();
     pb.set_prefix("✅  Download ");
-    // pb.finish_and_clear();
     Ok(())
 }
 
