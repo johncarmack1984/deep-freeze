@@ -1,10 +1,13 @@
-use crate::{db, localfs};
+use crate::{db, localfs, progress};
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::SdkConfig;
 use aws_sdk_s3::config::Region;
 use aws_sdk_s3::operation::abort_multipart_upload::AbortMultipartUploadError;
 use aws_sdk_s3::operation::complete_multipart_upload::{
-    CompleteMultipartUploadError, CompleteMultipartUploadOutput,
+    self, CompleteMultipartUploadError, CompleteMultipartUploadOutput,
+};
+use aws_sdk_s3::operation::create_multipart_upload::{
+    CreateMultipartUploadError, CreateMultipartUploadOutput,
 };
 use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
@@ -45,20 +48,27 @@ pub async fn get_s3_attrs(
     Ok::<GetObjectAttributesOutput, Error>(res)
 }
 
-// pub async fn create_multipart_upload(
-//     client: &Client,
-//     bucket: &str,
-//     key: &str,
-// ) -> Result<GetObjectAttributesOutput, Error> {
-//     let res = client
-//         .create_multipart_upload()
-//         .bucket(bucket)
-//         .key(key)
-//         .storage_class(StorageClass::DeepArchive)
-//         .send()
-//         .await?;
-//     Ok::<GetObjectAttributesOutput, Error>(res)
-// }
+pub async fn create_multipart_upload(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+) -> Result<CreateMultipartUploadOutput, SdkError<CreateMultipartUploadError>> {
+    match client
+        .create_multipart_upload()
+        .bucket(bucket)
+        .key(key)
+        .storage_class(StorageClass::DeepArchive)
+        .send()
+        .await
+    {
+        Ok(res) => Ok(res),
+        Err(err) => {
+            dbg!(&err);
+            println!("🚫  {err}");
+            Err(err)
+        }
+    }
+}
 
 pub async fn upload_part(
     client: &Client,
@@ -87,6 +97,27 @@ pub async fn upload_part(
     }
 }
 
+async fn complete_multipart_upload(
+    client: &Client,
+    bucket: &str,
+    key: &str,
+    completed_multipart_upload: CompletedMultipartUpload,
+    upload_id: &str,
+) -> Result<CompleteMultipartUploadOutput, SdkError<CompleteMultipartUploadError>> {
+    match client
+        .complete_multipart_upload()
+        .bucket(bucket)
+        .key(key)
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(upload_id)
+        .send()
+        .await
+    {
+        Ok(res) => Ok(res),
+        Err(err) => Err(err),
+    }
+}
+
 pub async fn multipart_upload(
     client: &Client,
     key: &str,
@@ -94,29 +125,72 @@ pub async fn multipart_upload(
     bucket: &str,
     m: &crate::progress::MultiProgress,
 ) -> Result<CompleteMultipartUploadOutput, SdkError<CompleteMultipartUploadError>> {
-    let res = client
-        .create_multipart_upload()
-        .bucket(bucket)
-        .key(key)
-        .storage_class(StorageClass::DeepArchive)
-        .send()
-        .await
-        .unwrap();
+    let res = create_multipart_upload(client, bucket, key).await.unwrap();
     let upload_id = res.upload_id().unwrap();
-    let path = Path::new(local_path);
+    let mut upload_parts: Vec<CompletedPart> = Vec::new();
 
+    let path = Path::new(local_path);
     let file_size = tokio::fs::metadata(path)
         .await
         .expect("file not found")
         .len();
-
-    let mut upload_parts: Vec<CompletedPart> = Vec::new();
-
-    let pb = m.add(crate::progress::new(file_size, "file_transfer"));
-    pb.set_prefix("⬆️  Upload  ");
-
     let (chunk_size, mut chunk_count, mut size_of_last_chunk) = chunk_math(file_size);
 
+    let pb = m.add(progress::new(file_size, "file_transfer"));
+    pb.set_prefix("⬆️  Upload  ");
+    upload_parts = handle_multipart_chunks_upload(
+        chunk_size,
+        chunk_count,
+        file_size,
+        size_of_last_chunk,
+        &key,
+        &local_path,
+        &bucket,
+        &upload_id,
+        &client,
+        &mut upload_parts,
+        &pb,
+    )
+    .await;
+    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+        .set_parts(Some(upload_parts))
+        .build();
+    pb.set_prefix("⏳  Completing upload. ");
+    match complete_multipart_upload(
+        &client,
+        &bucket,
+        &key,
+        completed_multipart_upload,
+        &upload_id,
+    )
+    .await
+    {
+        Ok(res) => {
+            pb.set_prefix("✅  Upload   ");
+            pb.finish();
+            Ok(res)
+        }
+        Err(err) => {
+            dbg!(&err);
+            println!("🚫  {err}");
+            Err(err)
+        }
+    }
+}
+
+async fn handle_multipart_chunks_upload(
+    chunk_size: u64,
+    chunk_count: u64,
+    file_size: u64,
+    size_of_last_chunk: u64,
+    key: &str,
+    local_path: &str,
+    bucket: &str,
+    upload_id: &str,
+    client: &Client,
+    upload_parts: &mut Vec<CompletedPart>,
+    pb: &crate::progress::Progress,
+) -> Vec<CompletedPart> {
     for chunk_index in 0..chunk_count {
         let this_chunk = if chunk_count - 1 == chunk_index {
             size_of_last_chunk
@@ -147,29 +221,7 @@ pub async fn multipart_upload(
         );
         pb.set_position(uploaded + this_chunk);
     }
-    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
-        .set_parts(Some(upload_parts))
-        .build();
-    pb.set_prefix("⏳  Completing upload. ");
-    match client
-        .complete_multipart_upload()
-        .bucket(bucket)
-        .key(key)
-        .multipart_upload(completed_multipart_upload)
-        .upload_id(upload_id)
-        .send()
-        .await
-    {
-        Ok(res) => {
-            pb.set_prefix("✅ Upload ");
-            Ok(res)
-        }
-        Err(err) => {
-            dbg!(&err);
-            println!("🚫  {err}");
-            Err(err)
-        }
-    }
+    upload_parts.to_owned()
 }
 
 pub async fn singlepart_upload(
