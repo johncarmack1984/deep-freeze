@@ -139,16 +139,9 @@ pub async fn multipart_upload(
     let pb = m.add(progress::new(file_size, "file_transfer"));
     pb.set_prefix("⬆️  Upload  ");
     upload_parts = handle_multipart_chunks_upload(
-        chunk_size,
-        chunk_count,
-        file_size,
-        size_of_last_chunk,
-        &key,
-        &local_path,
-        &bucket,
-        &upload_id,
-        &client,
-        &mut upload_parts,
+        (chunk_size, chunk_count, file_size, size_of_last_chunk),
+        (&key, &local_path, &bucket, &upload_id),
+        (&client, &mut upload_parts),
         &pb,
     )
     .await;
@@ -179,16 +172,9 @@ pub async fn multipart_upload(
 }
 
 async fn handle_multipart_chunks_upload(
-    chunk_size: u64,
-    chunk_count: u64,
-    file_size: u64,
-    size_of_last_chunk: u64,
-    key: &str,
-    local_path: &str,
-    bucket: &str,
-    upload_id: &str,
-    client: &Client,
-    upload_parts: &mut Vec<CompletedPart>,
+    (chunk_size, chunk_count, file_size, size_of_last_chunk): (u64, u64, u64, u64),
+    (key, local_path, bucket, upload_id): (&str, &str, &str, &str),
+    (client, upload_parts): (&Client, &mut Vec<CompletedPart>),
     pb: &crate::progress::Progress,
 ) -> Vec<CompletedPart> {
     for chunk_index in 0..chunk_count {
