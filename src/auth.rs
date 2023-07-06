@@ -62,7 +62,6 @@ async fn get_authorization_code() {
 }
 
 async fn refresh_token(http: &HTTPClient) -> String {
-    dbg!("refresh_token");
     println!("🔑 Refreshing access token...");
     let mut headers = HeaderMap::new();
     headers = http::dropbox_content_type_x_www_form_urlencoded_header(&mut headers);
@@ -78,11 +77,14 @@ async fn refresh_token(http: &HTTPClient) -> String {
         .await
     {
         Ok(res) => match res.contains("error") {
-            true => handle_auth_error(&http, res).await,
+            true => {
+                dbg!(&res);
+                handle_auth_error(&http, res).await
+            }
             false => {
                 let json = json::from_res(&res);
                 let access_token = json.get("access_token").unwrap().to_string().to_owned();
-                setenv("ACCESS_TOKEN", access_token);
+                setenv("DROPBOX_ACCESS_TOKEN", access_token);
                 get_current_account(&http).await
             }
         },
