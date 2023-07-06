@@ -1,22 +1,86 @@
 # Deep Freeze
 
-This is a Dropbox to Amazon S3 migration tool that uses a local SQLite database to track the migration status. It is designed to handle large migrations and recover from failures.
+Deep Freeze is a command-line tool for migrating files to Amazon S3 Deep Archive. It allows you to easily transfer files from various sources, such as Dropbox, to an S3 Deep Archive storage bucket.
 
 ## Prerequisites
 
-- You will need a Dropbox API access token and a configured AWS CLI with S3 access.
-- This tool uses the `rusoto_s3` and `rusoto_core` crates for AWS S3 interaction and `reqwest` for HTTP requests to the Dropbox API.
-- The `indicatif` crate provides a nice progress bar during file downloads, and `dotenv` is used for loading environment variables.
-- SQLite is used to keep track of file paths and migration status.
+Before using Deep Freeze, make sure you have the following prerequisites installed:
 
-## How it works
+- Rust programming language
+- Cargo package manager
 
-1. `dotenv().ok();`: Loads environment variables from a .env file located in the same directory.
-2. `check_account().await;`: Checks the Dropbox account details to verify that the API access token is correct and the account is accessible.
-3. `get_paths().await;`: Retrieves a list of file paths that need to be migrated from the SQLite database. If the list is empty, it queries the Dropbox API to fetch the file paths and populates the SQLite database with them.
-4. `perform_migration().await?;`: Takes the paths retrieved by `get_paths()` and begins the process of migrating them to the S3 bucket. It downloads the files from Dropbox, checks their integrity, uploads them to the S3 bucket, and updates the SQLite database to reflect the migrated status.
-5. `println!("✅✅✅  Migration complete");`: Prints a success message to the console when all files have been successfully migrated.
+## Installation
 
-## Error handling
+To install Deep Freeze, follow these steps:
 
-The `main` function uses the `?` operator, which can return early with an error if the `perform_migration()` function fails. The returned error is of type `Box<dyn std::error::Error>`, a boxed dynamic error trait object, which means that the function can return any type that implements the `Error` trait. This allows the function to return errors of different types in different situations.
+1. Clone the repository:
+
+   ```bash
+   git clone https://github.com/example/deep-freeze.git
+   ```
+
+2. Navigate to the project directory:
+
+   ```bash
+   cd deep-freeze
+   ```
+
+3. Build the project using Cargo:
+
+   ```bash
+   cargo build --release
+   ```
+
+4. The executable binary will be generated in the `target/release` directory.
+
+## Usage
+
+To use Deep Freeze, follow the steps below:
+
+1. Create a `.env` file in the project directory. This file should contain the necessary environment variables. Refer to the [Environment Variables](#environment-variables) section for a list of required variables.
+
+2. Run the Deep Freeze command with the desired options. Here's an example:
+
+   ```bash
+   ./deep-freeze --access-token <dropbox-access-token> --aws-access-key-id <aws-access-key-id> --aws-secret-access-key <aws-secret-access-key> --aws-region <aws-region> --dbfile <path-to-db-file> --env-file <path-to-env-file> --e2e
+   ```
+
+   Replace `<dropbox-access-token>`, `<aws-access-key-id>`, `<aws-secret-access-key>`, `<aws-region>`, `<path-to-db-file>`, and `<path-to-env-file>` with the appropriate values.
+
+3. Deep Freeze will perform the migration process and provide the status of the migration. If the migration is successful, the program will exit with a status code of 0. If an error occurs during migration, the program will exit with a non-zero status code.
+
+## Environment Variables
+
+Deep Freeze uses the following environment variables:
+
+- `DROPBOX_ACCESS_TOKEN`: Dropbox access token.
+- `AWS_ACCESS_KEY_ID`: AWS access key ID.
+- `AWS_SECRET_ACCESS_KEY`: AWS secret access key.
+- `AWS_REGION`: AWS region.
+- `DBFILE`: Path to the SQLite database file.
+- `ENV_FILE`: Path to the `.env` file.
+- `E2E`: Set to "true" to run the program with test values.
+- `RESET`: Set to "true" to reset the database and temp files.
+- `RESET_ONLY`: Set to "true" to reset the database and temp files, then exit.
+- `S3_BUCKET`: The S3 bucket to use.
+- `SILENT`: Set to "true" to run the program in silent mode.
+- `SKIP`: Comma-separated paths to skip during migration.
+- `TEMP_DIR`: Path to the temporary directory.
+
+Note: If an environment variable is not set, Deep Freeze will prompt for the value during runtime.
+
+## Contributing
+
+Contributions to Deep Freeze are welcome! If you find any issues or have suggestions for improvement, please open an issue or submit a pull request on the GitHub repository.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## Acknowledgments
+
+Deep Freeze makes use of the following libraries and dependencies:
+
+- [dotenv](https://crates.io/crates/dotenv) - For loading environment variables from a `.env` file.
+- [clap](https://crates.io/crates/clap) - For command-line argument parsing.
+- [tokio](https://crates.io/crates/tokio) - Asynchronous runtime for Rust.
