@@ -141,7 +141,7 @@ pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
         "INSERT OR REPLACE INTO config (dropbox_base_folder, s3_bucket, aws_region) VALUES ('{}', '{}', '{}');",
         dropbox_base_folder, s3_bucket, aws_region
     );
-    match sqlite::open("db.sqlite").unwrap().execute(&statement) {
+    match sqlite.execute(&statement) {
         Ok(_) => println!("📁  Config updated"),
         Err(err) => {
             println!("❌  Error in statement: {statement}");

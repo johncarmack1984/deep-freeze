@@ -1,4 +1,5 @@
 use std::{
+    env,
     fs::{self, File, OpenOptions},
     io::Write,
     path::Path,
@@ -53,6 +54,10 @@ pub fn reset() {
     let temp = Path::new("temp");
     if temp.exists() {
         fs::remove_dir_all(temp).unwrap();
+    }
+    let envpath = env::var("ENV_FILE").unwrap_or(".env".to_string());
+    if Path::new(&envpath).exists() {
+        fs::remove_file(&envpath).unwrap();
     }
     fs::create_dir_all(temp).unwrap()
 }

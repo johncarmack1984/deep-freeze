@@ -22,7 +22,7 @@ pub fn dropbox_authorization_header(headers: &mut HeaderMap) -> HeaderMap {
 
 pub fn dropbox_api_path_root_header(headers: &mut HeaderMap) -> HeaderMap {
     // val: format!("{{\".tag\": \"root\"}}").parse().unwrap()
-    let root_namespace_id = getenv("DROPBOX_ROOT_NAMESPACE_ID");
+    // let root_namespace_id = getenv("DROPBOX_ROOT_NAMESPACE_ID");
     let home_namespace_id = getenv("DROPBOX_HOME_NAMESPACE_ID");
     headers.insert(
         "Dropbox-API-Path-Root",

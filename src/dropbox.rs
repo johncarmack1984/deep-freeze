@@ -6,9 +6,9 @@ use std::{env, error::Error};
 use crate::db::{self, DBConnection};
 use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json::{self, JSON};
-use crate::localfs::{self, create_local_file, local_file_exists};
+use crate::localfs::{self, create_local_file};
 use crate::progress;
-use crate::util::{getenv, setenv};
+use crate::util::setenv;
 
 pub async fn add_files_to_list(
     json: &JSON,
@@ -86,8 +86,8 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
 
 pub async fn choose_folder(http: &HTTPClient, sqlite: &DBConnection) {
     let recursive = false;
-    let mut res = list_folder(&http, recursive).await;
-    let mut json: JSON = json::from_res(&res);
+    let res = list_folder(&http, recursive).await;
+    let json: JSON = json::from_res(&res);
     let folders = json.get("entries").unwrap().as_array().unwrap();
     let options: Vec<String> = folders
         .into_iter()
@@ -189,14 +189,12 @@ pub async fn download_from_dropbox(
     let mut downloaded: u64 = 0;
     let pb = m.add(progress::new(dropbox_size as u64, "file_transfer"));
     pb.set_prefix("⬇️   Download  ");
-    let local_file_exists = localfs::local_file_exists(&local_path.to_string());
     if localfs::get_local_size(&local_path) != dropbox_size {
         file = create_local_file(&local_path);
         while let Some(item) = stream.next().await {
             let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
             let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
             downloaded = new;
-            let percent = (downloaded as f64 / dropbox_size as f64) * 100.0;
             pb.set_position(downloaded);
             file.write(&chunk)
                 .or(Err(format!("❌  Error while writing to file")))?;

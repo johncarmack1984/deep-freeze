@@ -4,18 +4,17 @@ use crate::{db, localfs, progress};
 use aws_config::meta::region::RegionProviderChain;
 use aws_config::SdkConfig;
 use aws_sdk_s3::config::Region;
-use aws_sdk_s3::operation::abort_multipart_upload::AbortMultipartUploadError;
 use aws_sdk_s3::operation::complete_multipart_upload::{
-    self, CompleteMultipartUploadError, CompleteMultipartUploadOutput,
+    CompleteMultipartUploadError, CompleteMultipartUploadOutput,
 };
 use aws_sdk_s3::operation::create_multipart_upload::{
     CreateMultipartUploadError, CreateMultipartUploadOutput,
 };
 use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
-use aws_sdk_s3::operation::get_bucket_accelerate_configuration::{
-    GetBucketAccelerateConfigurationError, GetBucketAccelerateConfigurationOutput,
-};
-use aws_sdk_s3::operation::get_bucket_location::{GetBucketLocationError, GetBucketLocationOutput};
+// use aws_sdk_s3::operation::get_bucket_accelerate_configuration::{
+//     GetBucketAccelerateConfigurationError, GetBucketAccelerateConfigurationOutput,
+// };
+// use aws_sdk_s3::operation::get_bucket_location::{GetBucketLocationError, GetBucketLocationOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
 use aws_sdk_s3::operation::list_buckets::{ListBucketsError, ListBucketsOutput};
 use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
@@ -28,7 +27,6 @@ use aws_smithy_http::result::SdkError;
 use deep_freeze::{
     TrackableBodyStream, MAX_CHUNKS, MAX_CHUNK_SIZE, MAX_UPLOAD_SIZE, MIN_CHUNK_SIZE,
 };
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
@@ -105,52 +103,52 @@ pub async fn choose_bucket(client: &Client, sqlite: &DBConnection) {
             //     .unwrap();
             // dbg!(&aws_region.location_constraint().unwrap().as_str());
             // dbg!(&aws_region);
-            let config = get_bucket_acceleration_config(client, choice)
-                .await
-                .unwrap();
-            if &config.status().unwrap().as_str() == &"Enabled" {
-                println!("🚀  Acceleration enabled");
-                setenv("AWS_S3_BUCKET_ACCELERATION", "true".to_string());
-            } else {
-                setenv("AWS_S3_BUCKET_ACCELERATION", "false".to_string());
-            }
+            // let config = get_bucket_acceleration_config(client, choice)
+            //     .await
+            //     .unwrap();
+            // if &config.status().unwrap().as_str() == &"Enabled" {
+            //     println!("🚀  Acceleration enabled");
+            //     setenv("AWS_S3_BUCKET_ACCELERATION", "true".to_string());
+            // } else {
+            //     setenv("AWS_S3_BUCKET_ACCELERATION", "false".to_string());
+            // }
             db::insert_config(&sqlite);
         }
         Err(err) => panic!("❌  Error choosing folder {err}"),
     }
 }
 
-pub async fn get_bucket_acceleration_config(
-    client: &Client,
-    bucket: String,
-) -> Result<GetBucketAccelerateConfigurationOutput, SdkError<GetBucketAccelerateConfigurationError>>
-{
-    match client
-        .get_bucket_accelerate_configuration()
-        .bucket(bucket)
-        .send()
-        .await
-    {
-        Ok(res) => Ok(res),
-        Err(err) => Err(err),
-    }
-}
+// pub async fn _get_bucket_acceleration_config(
+//     client: &Client,
+//     bucket: String,
+// ) -> Result<GetBucketAccelerateConfigurationOutput, SdkError<GetBucketAccelerateConfigurationError>>
+// {
+//     match client
+//         .get_bucket_accelerate_configuration()
+//         .bucket(bucket)
+//         .send()
+//         .await
+//     {
+//         Ok(res) => Ok(res),
+//         Err(err) => Err(err),
+//     }
+// }
 
-pub async fn get_bucket_region(
-    client: &Client,
-    bucket: &str,
-) -> Result<GetBucketLocationOutput, SdkError<GetBucketLocationError>> {
-    dbg!(&bucket);
-    match client
-        .get_bucket_location()
-        .bucket("vegify-dropbox-archive")
-        .send()
-        .await
-    {
-        Ok(res) => Ok(res),
-        Err(err) => Err(err),
-    }
-}
+// pub async fn _get_bucket_region(
+//     client: &Client,
+//     bucket: &str,
+// ) -> Result<GetBucketLocationOutput, SdkError<GetBucketLocationError>> {
+//     dbg!(&bucket);
+//     match client
+//         .get_bucket_location()
+//         .bucket("vegify-dropbox-archive")
+//         .send()
+//         .await
+//     {
+//         Ok(res) => Ok(res),
+//         Err(err) => Err(err),
+//     }
+// }
 
 pub async fn get_s3_attrs(
     client: &Client,
@@ -253,12 +251,12 @@ pub async fn multipart_upload(
         .await
         .expect("file not found")
         .len();
-    let (chunk_size, mut chunk_count, mut size_of_last_chunk) = chunk_math(file_size);
+    let (chunk_size, chunk_count, size_of_last_chunk) = chunk_math(file_size);
 
     let pb = m.add(progress::new(file_size, "file_transfer"));
     pb.set_prefix("⬆️  Upload  ");
     upload_parts = handle_multipart_chunks_upload(
-        (chunk_size, chunk_count, file_size, size_of_last_chunk),
+        (chunk_size, chunk_count, size_of_last_chunk),
         (&key, &local_path, &bucket, &upload_id),
         (&client, &mut upload_parts),
         &pb,
@@ -291,7 +289,7 @@ pub async fn multipart_upload(
 }
 
 async fn handle_multipart_chunks_upload(
-    (chunk_size, chunk_count, file_size, size_of_last_chunk): (u64, u64, u64, u64),
+    (chunk_size, chunk_count, size_of_last_chunk): (u64, u64, u64),
     (key, local_path, bucket, upload_id): (&str, &str, &str, &str),
     (client, upload_parts): (&Client, &mut Vec<CompletedPart>),
     pb: &crate::progress::Progress,
@@ -303,7 +301,6 @@ async fn handle_multipart_chunks_upload(
             chunk_size
         };
         let uploaded = chunk_index * chunk_size;
-        let percent = (uploaded as f64 / file_size as f64) * 100.0;
         pb.set_prefix(format!("⬆️   Upload: Chunk {chunk_index}/{chunk_count} | ",));
         let stream = ByteStream::read_from()
             .path(Path::new(local_path))
@@ -341,12 +338,12 @@ pub async fn singlepart_upload(
             panic!("Could not open sample file: {}", e);
         })
         .unwrap();
-    let pb = crate::progress::new(body.content_length() as u64, "file_transfer");
+    let pb = m.add(crate::progress::new(
+        body.content_length() as u64,
+        "file_transfer",
+    ));
     pb.set_prefix("⬆️  Upload   ");
     body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
-        let percent = (sent as f64 / tot_size as f64) * 100.0;
-        let msg = format!("⬆️  {:.1}% uploaded.", percent);
-        // pb.set_message(msg);
         pb.inc(cur_buf as u64);
         if sent == tot_size {
             pb.set_prefix("✅  Upload   ");
@@ -366,7 +363,7 @@ pub async fn singlepart_upload(
         .send()
         .await
     {
-        res => Ok(res?),
+        Ok(res) => Ok(res),
         Err(err) => {
             dbg!(&err);
             println!("🚫  Upload failed");

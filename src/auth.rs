@@ -1,13 +1,11 @@
 use crate::db::{self, DBConnection};
 use crate::dropbox;
 use crate::http::{self, HTTPClient, HeaderMap};
-use crate::json::{self, JSON};
-use crate::util::{getenv, prompt, setenv};
-use inquire::formatter::OptionFormatter;
+use crate::json;
+use crate::util::{prompt, setenv};
+
 use inquire::{InquireError, Select};
 use open;
-use std::env;
-use std::io::{self, Write};
 
 async fn login(http: &HTTPClient) {
     println!("🔒 Initiating login...");

@@ -1,5 +1,3 @@
-#![allow(dead_code, unused)]
-
 mod auth;
 mod aws;
 mod cli;
@@ -11,8 +9,6 @@ mod json;
 mod localfs;
 mod progress;
 mod util;
-
-use dotenv::dotenv;
 
 use aws::AWSClient;
 use clap::Parser;
@@ -90,22 +86,6 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     if env::var("SILENT").unwrap() == "true" {
         println!("🔇 Running in silent mode...");
     }
-    if dotenv::var("SKIP").is_err() {
-        setenv("SKIP", args.skip.join(","));
-    }
-    if env::var("SKIP").unwrap() == "" {
-        println!("🚫 Skipping no paths");
-    } else {
-        println!("🚫 Skipping paths: {}", env::var("SKIP").unwrap());
-    }
-    setenv("TEMP_DIR", args.temp_dir);
-    if env::var("TEMP_DIR").unwrap() != "temp" {
-        println!("📁 Using temp directory: {}", env::var("TEMP_DIR").unwrap());
-    }
-    if dotenv::var("DBFILE").is_err() || args.dbfile != "db.sqlite" {
-        setenv("DBFILE", args.dbfile);
-    }
-    println!("🗄️  Using database file: {}", getenv("DBFILE"));
     setenv("RESET", args.reset.to_string());
     setenv("RESET_ONLY", args.reset_only.to_string());
     if args.e2e {
@@ -119,6 +99,9 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
         env::set_var("AWS_S3_BUCKET", "deep-freeze-test");
         env::set_var("RUST_BACKTRACE", "1");
     }
+    if dotenv::var("DBFILE").is_err() || args.dbfile != "db.sqlite" {
+        setenv("DBFILE", args.dbfile);
+    }
     if env::var("RESET").unwrap() == "true" || env::var("RESET_ONLY").unwrap() == "true" {
         reset().await;
         if env::var("RESET_ONLY").unwrap() == "true" {
@@ -127,12 +110,27 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
             process::exit(0)
         }
     }
+    if dotenv::var("SKIP").is_err() {
+        setenv("SKIP", args.skip.join(","));
+    }
+    if env::var("SKIP").unwrap() == "" {
+        print!("🚫 Skipping no paths\n\n");
+    } else {
+        print!("🚫 Skipping paths: {}\n\n", env::var("SKIP").unwrap());
+    }
+    setenv("TEMP_DIR", args.temp_dir);
+    if env::var("TEMP_DIR").unwrap() != "temp" {
+        println!("📁 Using temp directory: {}", env::var("TEMP_DIR").unwrap());
+    }
+    println!("🗄️  Using database file: {}", getenv("DBFILE"));
     if !args.access_token.is_empty() {
         setenv("DROPBOX_ACCESS_TOKEN", args.access_token);
     }
+
     let database: DBConnection = db::connect(getenv("DBFILE").as_str());
     let http: HTTPClient = http::new_client();
     let aws: AWSClient = aws::new_client().await;
+
     if args.aws_access_key_id != "" {
         setenv("AWS_ACCESS_KEY_ID", args.aws_access_key_id);
     }
@@ -168,11 +166,11 @@ async fn reset() {
     db::reset(env::var("DBFILE").unwrap().as_str());
     println!("🚮  Database reset");
     localfs::reset();
-    println!("🚮  Temp files deleted");
-    if env::var("E2E").unwrap() == "true" {
+    println!("🚮  Temp & env files deleted");
+    if dotenv::var("E2E").is_ok() && env::var("E2E").unwrap() == "true" {
         println!("🗑️  Resetting test bucket");
         crate::aws::_empty_test_bucket().await;
         println!("🚮  Test bucket reset");
     }
-    println!("🎉 Reset complete");
+    print!("🎉 Reset complete\n\n");
 }
