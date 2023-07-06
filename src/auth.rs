@@ -66,7 +66,7 @@ async fn refresh_token(http: &HTTPClient) -> String {
     println!("🔑 Refreshing access token...");
     let mut headers = HeaderMap::new();
     headers = http::dropbox_content_type_x_www_form_urlencoded_header(&mut headers);
-    let body = http::dropbox_refresh_token_body();
+    let body = http::dropbox_refresh_token_body().await;
     match http
         .post("https://api.dropbox.com/oauth2/token")
         .headers(headers)
