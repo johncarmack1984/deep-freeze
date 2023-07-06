@@ -3,9 +3,13 @@ use serde_json::Value;
 pub type JSON = serde_json::Value;
 
 pub fn from_res(res: &String) -> Value {
+    dbg!(&res);
     match serde_json::from_str::<Value>(res) {
         Ok(json) => json,
-        Err(e) => panic!("❌  Error: {e}"),
+        Err(e) => {
+            dbg!(&e);
+            panic!("❌  Error: {e}")
+        }
     }
 }
 
