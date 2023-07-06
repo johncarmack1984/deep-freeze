@@ -21,19 +21,22 @@ use util::{getenv, setenv};
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Dropbox access token
-    #[arg(short = 'a', long, default_value = "")]
+    #[arg(long, default_value = "")]
     access_token: String,
     /// AWS access key ID
-    #[arg(short = 'k', long, default_value = "")]
+    #[arg(long, default_value = "")]
     aws_access_key_id: String,
     /// AWS secret access key
-    #[arg(short = 'c', long, default_value = "")]
+    #[arg(long, default_value = "")]
     aws_secret_access_key: String,
     /// AWS region
-    #[arg(short = 'g', long, default_value = "")]
+    #[arg(long, default_value = "")]
     aws_region: String,
+    /// Check the migration status of files
+    #[arg(short, long, default_value = "false")]
+    check_only: bool,
     /// Path to the sqlite database file
-    #[arg(short, long, default_value = "db.sqlite")]
+    #[arg(long, default_value = "db.sqlite")]
     dbfile: String,
     /// Path to the .env file
     #[arg(short = 'v', long, default_value = ".env")]
@@ -48,16 +51,16 @@ struct Args {
     #[arg(short = 'R', long, default_value = "false")]
     reset_only: bool,
     /// Define the S3 folder to use
-    #[arg(short = '3', long, default_value = "")]
+    #[arg(long, default_value = "")]
     s3_bucket: String,
     /// Run in silent mode
     #[arg(short, long, default_value = "false")]
     silent: bool,
     /// Skip these paths (e.g. --skip "path1,path2")
-    #[arg(short = 'p', long)]
+    #[arg(long)]
     skip: Vec<String>,
     /// Path to the temp directory
-    #[arg(short = 't', long, default_value = "temp")]
+    #[arg(long, default_value = "temp")]
     temp_dir: String,
 }
 
@@ -86,6 +89,7 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     if env::var("SILENT").unwrap() == "true" {
         println!("🔇 Running in silent mode...");
     }
+    setenv("CHECK_ONLY", args.check_only.to_string());
     setenv("RESET", args.reset.to_string());
     setenv("RESET_ONLY", args.reset_only.to_string());
     if args.e2e {
@@ -123,14 +127,10 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
         println!("📁 Using temp directory: {}", env::var("TEMP_DIR").unwrap());
     }
     println!("🗄️  Using database file: {}", getenv("DBFILE"));
+
     if !args.access_token.is_empty() {
         setenv("DROPBOX_ACCESS_TOKEN", args.access_token);
     }
-
-    let database: DBConnection = db::connect(getenv("DBFILE").as_str());
-    let http: HTTPClient = http::new_client();
-    let aws: AWSClient = aws::new_client().await;
-
     if args.aws_access_key_id != "" {
         setenv("AWS_ACCESS_KEY_ID", args.aws_access_key_id);
     }
@@ -148,6 +148,11 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     if args.s3_bucket != "" {
         setenv("AWS_S3_BUCKET", args.s3_bucket);
     }
+
+    let database: DBConnection = db::connect(getenv("DBFILE").as_str());
+    let http: HTTPClient = http::new_client();
+    let aws: AWSClient = aws::new_client().await;
+
     if env::var("AWS_S3_BUCKET").is_err() {
         aws::choose_bucket(&aws, &database).await;
     }

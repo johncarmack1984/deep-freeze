@@ -6,6 +6,7 @@ use crate::dropbox;
 use crate::localfs;
 use crate::progress;
 use crate::util;
+use crate::util::getenv;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use std::env;
 
@@ -59,11 +60,11 @@ async fn migrate_file_to_s3(
         .to_string();
 
     match check_migration_status(&aws, &sqlite, &row).await {
-        0 => (),
-        1 => {
-            print!("🪺  Already migrated\n\n");
-            return Ok(());
-        }
+        0 => match getenv("CHECK_ONLY").as_str() {
+            "true" => return Ok(()),
+            _ => (),
+        },
+        1 => return Ok(()),
         err => {
             dbg!("err");
             println!("❌  Unknown migration status {err}");
