@@ -43,6 +43,11 @@ pub async fn perform_migration(
                 .unwrap();
         }
     }
+    db::report_status(&sqlite);
+    if getenv("CHECK_ONLY") == "true" {
+        print!("\n\n✅  Exiting\n\n");
+        std::process::exit(0);
+    }
     println!("");
     Ok(())
 }
@@ -91,17 +96,18 @@ async fn migrate_file_to_s3(
         .await
         .unwrap();
 
+    // TODO verify checksum from DB
+
     match aws::upload_to_s3(&aws, &key, &local_path, &bucket, &m).await {
         Ok(_) => (),
         Err(err) => {
             println!("🚫  {err}");
             db::set_unmigrated(&sqlite, &dropbox_id);
-            localfs::delete_local_file(&local_path);
+            // localfs::delete_local_file(&local_path);
             db::set_skip(&sqlite, &dropbox_id);
         }
     }
 
-    // TODO verify checksum from DB
     // TODO create checksum from file for AWS
 
     match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_id, &key).await {
