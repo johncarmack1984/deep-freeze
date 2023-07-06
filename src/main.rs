@@ -27,6 +27,15 @@ struct Args {
     /// Dropbox access token
     #[arg(short = 'a', long, default_value = "")]
     access_token: String,
+    /// AWS access key ID
+    #[arg(short = 'k', long, default_value = "")]
+    aws_access_key_id: String,
+    /// AWS secret access key
+    #[arg(short = 'c', long, default_value = "")]
+    aws_secret_access_key: String,
+    /// AWS region
+    #[arg(short = 'g', long, default_value = "")]
+    aws_region: String,
     /// Path to the sqlite database file
     #[arg(short, long, default_value = "db.sqlite")]
     dbfile: String,
@@ -42,7 +51,6 @@ struct Args {
     /// Reset the database and temp files, then exit
     #[arg(short = 'R', long, default_value = "false")]
     reset_only: bool,
-
     /// Define the S3 folder to use
     #[arg(short = '3', long, default_value = "")]
     s3_bucket: String,
@@ -50,7 +58,7 @@ struct Args {
     #[arg(short, long, default_value = "false")]
     silent: bool,
     /// Skip these paths (e.g. --skip "path1,path2")
-    #[arg(short = 'k', long)]
+    #[arg(short = 'p', long)]
     skip: Vec<String>,
     /// Path to the temp directory
     #[arg(short = 't', long, default_value = "temp")]
@@ -125,23 +133,32 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     let database: DBConnection = db::connect(getenv("DBFILE").as_str());
     let http: HTTPClient = http::new_client();
     let aws: AWSClient = aws::new_client().await;
+    if args.aws_access_key_id != "" {
+        setenv("AWS_ACCESS_KEY_ID", args.aws_access_key_id);
+    }
     if env::var("AWS_ACCESS_KEY_ID").is_err() {
         let aws_access_key_id = util::prompt("📦  AWS access key ID");
         setenv("AWS_ACCESS_KEY_ID", aws_access_key_id);
     }
+    if args.aws_secret_access_key != "" {
+        setenv("AWS_SECRET_ACCESS_KEY", args.aws_secret_access_key);
+    }
     if env::var("AWS_SECRET_ACCESS_KEY").is_err() {
         let aws_secret_access_key = util::prompt("📦  AWS secret access key");
         setenv("AWS_SECRET_ACCESS_KEY", aws_secret_access_key);
-    }
-    if env::var("AWS_REGION").is_err() {
-        let aws_region = util::prompt("📦  AWS region");
-        setenv("AWS_REGION", aws_region);
     }
     if args.s3_bucket != "" {
         setenv("AWS_S3_BUCKET", args.s3_bucket);
     }
     if env::var("AWS_S3_BUCKET").is_err() {
         aws::choose_bucket(&aws, &database).await;
+    }
+    if args.aws_region != "" {
+        setenv("AWS_REGION", args.aws_region);
+    }
+    if env::var("AWS_REGION").is_err() {
+        // let aws_region = util::prompt("📦  AWS region");
+        setenv("AWS_REGION", "us-east-1".to_string());
     }
     (database, http, aws)
 }

@@ -12,6 +12,10 @@ use aws_sdk_s3::operation::create_multipart_upload::{
     CreateMultipartUploadError, CreateMultipartUploadOutput,
 };
 use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
+use aws_sdk_s3::operation::get_bucket_accelerate_configuration::{
+    GetBucketAccelerateConfigurationError, GetBucketAccelerateConfigurationOutput,
+};
+use aws_sdk_s3::operation::get_bucket_location::{GetBucketLocationError, GetBucketLocationOutput};
 use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
 use aws_sdk_s3::operation::list_buckets::{ListBucketsError, ListBucketsOutput};
 use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
@@ -34,6 +38,7 @@ pub async fn new_config() -> SdkConfig {
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
         .or_else(Region::new("us-east-1"));
+    // let endpoint_url_provider
     aws_config::from_env().region(region_provider).load().await
 }
 
@@ -92,10 +97,58 @@ pub async fn choose_bucket(client: &Client, sqlite: &DBConnection) {
     {
         Ok(choice) => {
             println!("🗄️  You chose {choice}");
-            setenv("AWS_S3_BUCKET", choice);
+            setenv("AWS_S3_BUCKET", choice.to_string());
+            // let aws_region = get_bucket_region(&client, &choice).await.unwrap();
+            // dbg!(&aws_region);
+            // let aws_region = get_bucket_region(&aws, "font.vegify.app")
+            //     .await
+            //     .unwrap();
+            // dbg!(&aws_region.location_constraint().unwrap().as_str());
+            // dbg!(&aws_region);
+            let config = get_bucket_acceleration_config(client, choice)
+                .await
+                .unwrap();
+            if &config.status().unwrap().as_str() == &"Enabled" {
+                println!("🚀  Acceleration enabled");
+                setenv("AWS_S3_BUCKET_ACCELERATION", "true".to_string());
+            } else {
+                setenv("AWS_S3_BUCKET_ACCELERATION", "false".to_string());
+            }
             db::insert_config(&sqlite);
         }
         Err(err) => panic!("❌  Error choosing folder {err}"),
+    }
+}
+
+pub async fn get_bucket_acceleration_config(
+    client: &Client,
+    bucket: String,
+) -> Result<GetBucketAccelerateConfigurationOutput, SdkError<GetBucketAccelerateConfigurationError>>
+{
+    match client
+        .get_bucket_accelerate_configuration()
+        .bucket(bucket)
+        .send()
+        .await
+    {
+        Ok(res) => Ok(res),
+        Err(err) => Err(err),
+    }
+}
+
+pub async fn get_bucket_region(
+    client: &Client,
+    bucket: &str,
+) -> Result<GetBucketLocationOutput, SdkError<GetBucketLocationError>> {
+    dbg!(&bucket);
+    match client
+        .get_bucket_location()
+        .bucket("vegify-dropbox-archive")
+        .send()
+        .await
+    {
+        Ok(res) => Ok(res),
+        Err(err) => Err(err),
     }
 }
 
