@@ -61,7 +61,10 @@ async fn migrate_file_to_s3(
 
     match check_migration_status(&aws, &sqlite, &row).await {
         0 => match getenv("CHECK_ONLY").as_str() {
-            "true" => return Ok(()),
+            "true" => {
+                print!("\n\n");
+                return Ok(());
+            }
             _ => (),
         },
         1 => return Ok(()),

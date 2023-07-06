@@ -59,6 +59,9 @@ struct Args {
     /// Skip these paths (e.g. --skip "path1,path2")
     #[arg(long)]
     skip: Vec<String>,
+    /// Display the migration status of files, then exit
+    #[arg(long, default_value = "false")]
+    status_only: bool,
     /// Path to the temp directory
     #[arg(long, default_value = "temp")]
     temp_dir: String,
@@ -90,6 +93,7 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
         println!("🔇 Running in silent mode...");
     }
     setenv("CHECK_ONLY", args.check_only.to_string());
+    setenv("STATUS_ONLY", args.status_only.to_string());
     setenv("RESET", args.reset.to_string());
     setenv("RESET_ONLY", args.reset_only.to_string());
     if args.e2e {
@@ -150,6 +154,13 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     }
 
     let database: DBConnection = db::connect(getenv("DBFILE").as_str());
+
+    if getenv("STATUS_ONLY") == "true" {
+        db::report_status(&database);
+        println!("✅  Exiting");
+        process::exit(0)
+    }
+
     let http: HTTPClient = http::new_client();
     let aws: AWSClient = aws::new_client().await;
 
