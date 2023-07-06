@@ -77,7 +77,7 @@ pub fn init(connection: &ConnectionWithFullMutex) {
                 aws_secret_access_key TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS config (
-                dropbox_base_folder TEXT NOT NULL,
+                dropbox_base_folder,
                 s3_bucket TEXT,
                 aws_region TEXT
             );
