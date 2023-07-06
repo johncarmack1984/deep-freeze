@@ -1,5 +1,6 @@
 use std::env;
 
+use indicatif::HumanBytes;
 use sedregex::find_and_replace;
 use sqlite::{self, ConnectionWithFullMutex};
 
@@ -280,7 +281,7 @@ pub fn get_pretty_total_size(connection: &ConnectionWithFullMutex) -> String {
     }
     match size {
         size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => pretty_bytes::converter::convert(size),
+        size if size > 0.0 => HumanBytes(size as u64).to_string(),
         _ => panic!("❌  Negative size"),
     }
 }
@@ -302,7 +303,7 @@ pub fn get_pretty_migrated_size(connection: &ConnectionWithFullMutex) -> String 
     }
     match size {
         size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => pretty_bytes::converter::convert(size),
+        size if size > 0.0 => HumanBytes(size as u64).to_string(),
         _ => panic!("❌  Negative size"),
     }
 }
@@ -324,7 +325,7 @@ pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> Strin
     }
     match size {
         size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => pretty_bytes::converter::convert(size),
+        size if size > 0.0 => HumanBytes(size as u64).to_string(),
         _ => panic!("❌  Negative size"),
     }
 }

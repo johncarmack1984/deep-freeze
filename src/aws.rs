@@ -27,6 +27,7 @@ use aws_smithy_http::result::SdkError;
 use deep_freeze::{
     TrackableBodyStream, MAX_CHUNKS, MAX_CHUNK_SIZE, MAX_UPLOAD_SIZE, MIN_CHUNK_SIZE,
 };
+use indicatif::HumanBytes;
 use std::path::{Path, PathBuf};
 use std::result::Result;
 
@@ -418,8 +419,8 @@ pub async fn confirm_upload_size(
         false => {
             return Err(format!(
                 "DropBox file size {} does not match S3 {}",
-                pretty_bytes::converter::convert(dropbox_size as f64),
-                pretty_bytes::converter::convert(s3_size as f64)
+                HumanBytes(dropbox_size.try_into().unwrap()),
+                HumanBytes(s3_size.try_into().unwrap())
             )
             .into());
         }
