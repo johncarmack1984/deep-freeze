@@ -83,8 +83,8 @@ async fn refresh_token(http: &HTTPClient) -> String {
             }
             false => {
                 let json = json::from_res(&res);
-                let access_token = json.get("access_token").unwrap().to_string().to_owned();
-                setenv("DROPBOX_ACCESS_TOKEN", access_token);
+                let access_token = json.get("access_token").unwrap().as_str().unwrap();
+                setenv("DROPBOX_ACCESS_TOKEN", access_token.to_string());
                 get_current_account(&http).await
             }
         },
