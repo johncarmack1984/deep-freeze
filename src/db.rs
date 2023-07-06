@@ -142,7 +142,7 @@ pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
         dropbox_base_folder, s3_bucket, aws_region
     );
     match sqlite.execute(&statement) {
-        Ok(_) => println!("📁  Config updated"),
+        Ok(_) => print!("\n📁  Configuration updated\n\n"),
         Err(err) => {
             println!("❌  Error in statement: {statement}");
             panic!("{}", err);

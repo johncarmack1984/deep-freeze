@@ -342,7 +342,7 @@ pub async fn singlepart_upload(
         body.content_length() as u64,
         "file_transfer",
     ));
-    pb.set_prefix("⬆️  Upload   ");
+    pb.set_prefix("⬆️   Upload   ");
     body.set_callback(move |tot_size: u64, sent: u64, cur_buf: u64| {
         pb.inc(cur_buf as u64);
         if sent == tot_size {
