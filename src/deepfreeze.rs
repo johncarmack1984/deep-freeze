@@ -39,7 +39,9 @@ pub async fn perform_migration(
             println!("✅ Skipping {dropbox_id}");
             continue;
         } else {
-            auth::refresh_token(&http).await;
+            if getenv("CHECK_ONLY") != "true" {
+                auth::refresh_token(&http).await;
+            }
             migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
                 .await
                 .unwrap();
