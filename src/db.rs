@@ -1,9 +1,10 @@
 use std::env;
 
+use indicatif::HumanBytes;
 use sedregex::find_and_replace;
 use sqlite::{self, ConnectionWithFullMutex};
 
-use crate::json::JSON;
+use crate::{json::JSON, util::setenv};
 
 pub type DBConnection = ConnectionWithFullMutex;
 pub type DBRow = sqlite::Row;
@@ -22,26 +23,42 @@ pub fn reset(dbpath: &str) {
 
 pub fn report_status(sqlite: &ConnectionWithFullMutex) {
     let total_rows = count_rows(&sqlite);
-    println!("🗃️  {total_rows} files in database");
+    let total_size = get_total_size(&sqlite);
     let migrated_rows = count_migrated(&sqlite);
-    if migrated_rows > 0 {
-        println!("🎉 {migrated_rows} already migrated");
-    }
+    let migrated_size = get_migrated_size(&sqlite);
+    let unmigrated_size = get_unmigrated_size(&sqlite);
     let unmigrated_rows = total_rows - migrated_rows;
-    let unmigrated_size: String = get_pretty_unmigrated_size(sqlite);
-    println!("🗃️  {unmigrated_rows} files ({unmigrated_size}) left to migrate");
+
     let percent = if migrated_rows > 0 {
-        (100 * migrated_rows / total_rows).abs()
+        (100 * migrated_size / total_size).abs()
     } else {
         0
     };
+
+    println!(
+        "🗃️   Total: {total_rows} files ({})",
+        HumanBytes(total_size as u64)
+    );
+
+    if migrated_rows > 0 {
+        println!(
+            "🪺  Migrated: {migrated_rows} files ({})",
+            HumanBytes(migrated_size as u64)
+        );
+    }
+
+    println!(
+        "🪹  Remaining: {unmigrated_rows} files ({})",
+        HumanBytes(unmigrated_size as u64)
+    );
+
     match percent {
         0 => println!("🤷 {percent}% done"),
         100 => {
             println!("🎉 All files migrated");
             std::process::exit(0);
         }
-        _ => println!("🎉 {percent}% done!"),
+        _ => print!("🎉  {percent}% done!\n\n"),
     }
 }
 
@@ -63,24 +80,24 @@ pub fn init(connection: &ConnectionWithFullMutex) {
             );
             CREATE TABLE IF NOT EXISTS user (
                 dropbox_user_id TEXT UNIQUE NOT NULL,
-                dropbox_team_member_id TEXT NOT NULL,
-                dropbox_email TEXT NOT NULL,
-                dropbox_refresh_token TEXT NOT NULL,
-                dropbox_access_token TEXT NOT NULL,
-                dropbox_authorization_code TEXT NOT NULL,
-                aws_access_key_id TEXT NOT NULL,
-                aws_secret_access_key TEXT NOT NULL
+                dropbox_team_member_id TEXT UNIQUE NOT NULL,
+                dropbox_email TEXT UNIQUE NOT NULL,
+                dropbox_refresh_token TEXT UNIQUE NOT NULL,
+                dropbox_access_token TEXT UNIQUE NOT NULL,
+                dropbox_authorization_code TEXT UNIQUE NOT NULL,
+                dropbox_root_namespace_id STRING UNIQUE NOT NULL,
+                dropbox_home_namespace_id STRING UNIQUE NOT NULL,
+                aws_access_key_id TEXT UNIQUE NOT NULL,
+                aws_secret_access_key TEXT UNIQUE NOT NULL
             );
             CREATE TABLE IF NOT EXISTS config (
-                dropbox_app_key TEXT NOT NULL,
-                dropbox_app_secret TEXT NOT NULL,
-                dropbox_base_folder TEXT NOT NULL,
-                s3_bucket TEXT NOT NULL,
-                aws_region TEXT NOT NULL
+                dropbox_base_folder TEXT,
+                s3_bucket TEXT,
+                aws_region TEXT
             );
             ",
     ) {
-        Ok(_) => println!("📁 Database initialized"),
+        Ok(_) => println!("📁  Database initialized"),
         Err(err) => panic!("❌  {err}"),
     }
 }
@@ -130,10 +147,51 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .to_owned()
 }
 
-pub fn insert_user(connection: &ConnectionWithFullMutex, json: &JSON) {
-    let dropbox_user_id = json.get("account_id").unwrap().as_str().unwrap();
-    let dropbox_team_member_id = json.get("team_member_id").unwrap().as_str().unwrap();
-    let dropbox_email = json.get("email").unwrap().as_str().unwrap();
+pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
+    let dropbox_base_folder = env::var("DROPBOX_BASE_FOLDER").unwrap_or(String::new());
+    let s3_bucket = env::var("S3_BUCKET").unwrap_or(String::new());
+    let aws_region = env::var("AWS_REGION").unwrap_or(String::new());
+    let statement = format!(
+        "INSERT OR REPLACE INTO config (dropbox_base_folder, s3_bucket, aws_region) VALUES ('{}', '{}', '{}');",
+        dropbox_base_folder, s3_bucket, aws_region
+    );
+    match sqlite.execute(&statement) {
+        Ok(_) => print!("\n📁  Configuration updated\n\n"),
+        Err(err) => {
+            println!("❌  Error in statement: {statement}");
+            panic!("{}", err);
+        }
+    }
+}
+
+pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
+    let dropbox_user_id = member.get("account_id").unwrap().as_str().unwrap();
+    let dropbox_team_member_id = member.get("team_member_id").unwrap().as_str().unwrap();
+    setenv("DROPBOX_TEAM_MEMBER_ID", dropbox_team_member_id.to_string());
+    let dropbox_email = member.get("email").unwrap().as_str().unwrap();
+    let default = JSON::String("0".to_string());
+    let dropbox_root_namespace_id = member
+        .get("root_info")
+        .unwrap_or(&default)
+        .get("root_namespace_id")
+        .unwrap_or(&default)
+        .as_str()
+        .unwrap_or("0");
+    setenv(
+        "DROPBOX_ROOT_NAMESPACE_ID",
+        dropbox_root_namespace_id.to_string(),
+    );
+    let dropbox_home_namespace_id = member
+        .get("root_info")
+        .unwrap_or(&default)
+        .get("home_namespace_id")
+        .unwrap_or(&default)
+        .as_str()
+        .unwrap_or("0");
+    setenv(
+        "DROPBOX_HOME_NAMESPACE_ID",
+        dropbox_home_namespace_id.to_string(),
+    );
     let dropbox_refresh_token = env::var("DROPBOX_REFRESH_TOKEN").unwrap_or(String::new());
     let dropbox_access_token = env::var("DROPBOX_ACCESS_TOKEN").unwrap_or(String::new());
     let dropbox_authorization_code =
@@ -141,11 +199,14 @@ pub fn insert_user(connection: &ConnectionWithFullMutex, json: &JSON) {
     let aws_access_key_id = env::var("AWS_ACCESS_KEY_ID").unwrap_or(String::new());
     let aws_secret_access_key = env::var("AWS_SECRET_ACCESS_KEY").unwrap_or(String::new());
     let statement = format!(
-            "INSERT OR REPLACE INTO user (dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key) VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}');",
-            dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key
+            "INSERT OR REPLACE INTO user (dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_root_namespace_id, dropbox_home_namespace_id, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key) VALUES ('{}', '{}', '{}', '{}', '{}', '{}', '{}', '{}','{}','{}');",
+            dropbox_user_id, dropbox_team_member_id, dropbox_email, dropbox_root_namespace_id, dropbox_home_namespace_id, dropbox_refresh_token, dropbox_access_token, dropbox_authorization_code, aws_access_key_id, aws_secret_access_key
         );
     match connection.execute(&statement) {
-        Ok(_) => (),
+        Ok(_) => {
+            println!("👤  User {dropbox_email} updated");
+            ()
+        }
         Err(err) => {
             print!("\n\n❌  Error in statement:\n\n{:?}\n\n", statement);
             panic!("{}", err);
@@ -154,9 +215,8 @@ pub fn insert_user(connection: &ConnectionWithFullMutex, json: &JSON) {
 }
 
 pub fn count_rows(connection: &ConnectionWithFullMutex) -> i64 {
-    let query = "SELECT COUNT(*) FROM paths";
     connection
-        .prepare(query)
+        .prepare("SELECT COUNT(*) FROM paths")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
@@ -177,10 +237,9 @@ pub fn count_migrated(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
-    let query = "SELECT COUNT(*) FROM paths WHERE migrated < 1";
+pub fn _count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
     connection
-        .prepare(query)
+        .prepare("SELECT COUNT(*) FROM paths WHERE migrated < 1")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
@@ -202,7 +261,7 @@ pub fn set_unmigrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     match connection.execute(format!(
         "UPDATE paths SET migrated = 0 WHERE dropbox_id = '{dropbox_id}';",
     )) {
-        Ok(_) => println!("🪹   Not migrated: {dropbox_id}"),
+        Ok(_) => println!("🪹  Not migrated: {dropbox_id}"),
         Err(err) => panic!("❌  {err}"),
     }
 }
@@ -216,25 +275,45 @@ pub fn set_skip(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     }
 }
 
-pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> String {
-    let size: f64;
-    if count_unmigrated(connection) == 0 {
-        size = 0.0;
-    } else {
-        let query = "SELECT SUM(dropbox_size) FROM paths WHERE migrated < 1";
-        size = connection
-            .prepare(query)
-            .unwrap()
-            .into_iter()
-            .map(|row| row.unwrap())
-            .map(|row| row.read::<i64, _>(0))
-            .next()
-            .unwrap() as f64;
+pub fn get_total_size(connection: &DBConnection) -> i64 {
+    match connection
+        .prepare("SELECT SUM(dropbox_size) FROM paths")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+    {
+        Some(size) => size as i64,
+        None => 0,
     }
-    match size {
-        size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => pretty_bytes::converter::convert(size),
-        _ => panic!("❌  Negative size"),
+}
+
+pub fn get_migrated_size(connection: &ConnectionWithFullMutex) -> i64 {
+    match connection
+        .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated = 1")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+    {
+        Some(size) => size,
+        None => 0,
+    }
+}
+
+pub fn get_unmigrated_size(connection: &ConnectionWithFullMutex) -> i64 {
+    match connection
+        .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated < 1")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+    {
+        Some(size) => size,
+        None => 0,
     }
 }
 

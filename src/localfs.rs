@@ -1,8 +1,19 @@
 use std::{
-    fs::{self, File},
+    env,
+    fs::{self, File, OpenOptions},
     io::Write,
     path::Path,
 };
+
+pub fn get_local_file(local_path: &str) -> File {
+    OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&local_path)
+        .unwrap()
+}
 
 pub fn local_file_exists(local_path: &str) -> bool {
     let path = Path::new(local_path);
@@ -34,13 +45,19 @@ pub fn get_local_size(local_path: &str) -> i64 {
 }
 
 pub fn delete_local_file(local_path: &str) -> () {
-    fs::remove_file(&local_path).unwrap();
+    if local_file_exists(local_path) {
+        fs::remove_file(&local_path).unwrap();
+    }
 }
 
 pub fn reset() {
     let temp = Path::new("temp");
     if temp.exists() {
         fs::remove_dir_all(temp).unwrap();
+    }
+    let envpath = env::var("ENV_FILE").unwrap_or(".env".to_string());
+    if Path::new(&envpath).exists() {
+        fs::remove_file(&envpath).unwrap();
     }
     fs::create_dir_all(temp).unwrap()
 }
