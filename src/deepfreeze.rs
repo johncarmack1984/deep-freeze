@@ -31,39 +31,44 @@ static MIGRATION_STEPS: &[&str] = &[
 pub async fn perform_migration(
     http: reqwest::Client,
     sqlite: sqlite::ConnectionWithFullMutex,
+    aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     print!("\n🧊  Performing migration...\n\n\n\n");
     let m = progress::new_multi_progress();
     let started = Instant::now();
-    for row in sqlite
+    let rows: Vec<_> = sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
-        .into_iter()
-        .map(|row| row.unwrap())
-    {
-        auth::refresh_token(&http).await;
-        let dropbox_id = row
-            .try_read::<&str, &str>("dropbox_id")
-            .unwrap()
-            .to_string();
-        let filter = |&i| i == dropbox_id;
-        if env::var("SKIP")
-            .unwrap_or("".to_string())
-            .split(',')
-            .collect::<Vec<&str>>()
-            .iter()
-            .any(filter)
-        {
-            println!("✅ Skipping {dropbox_id}");
-            continue;
-        } else {
-            tokio::task::spawn(async move {
-                migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
-                    .await
-                    .unwrap();
-            });
-        }
-    }
+        .iter()
+        // .map(|row| row.unwrap());
+        .map(|row| async {
+            auth::refresh_token(&http).await;
+            let dropbox_id = row
+                // .as_ref()
+                .unwrap()
+                .try_read::<&str, &str>("dropbox_id")
+                .unwrap()
+                .to_string();
+            let filter = |&i| i == dropbox_id;
+            if env::var("SKIP")
+                .unwrap_or("".to_string())
+                .split(',')
+                .collect::<Vec<&str>>()
+                .iter()
+                .any(filter)
+            {
+                println!("✅ Skipping {dropbox_id}");
+            } else {
+                tokio::task::spawn(async move {
+                    println!("📂  Migrating {dropbox_id}");
+                    // dbg!(row);
+                    // migrate_file_to_s3(row.unwrap(), &http, &aws, &sqlite, &m)
+                    //     .await
+                    //     .unwrap();
+                });
+            }
+        })
+        .collect();
     for row in rows {
         row.await;
     }
@@ -116,11 +121,11 @@ async fn migrate_file_to_s3(
 
     // println!("📂  Migrating {key}");
 
-    // let local_path = format!("./temp/{key}");
+    let local_path = format!("./temp/{key}");
 
-    // dropbox::download_from_dropbox(&http, &dropbox_id, &dropbox_path, &local_path, &m)
-    //     .await
-    //     .unwrap();
+    dropbox::download_from_dropbox(&http, &dropbox_id, &dropbox_path, &local_path, &m)
+        .await
+        .unwrap();
 
     // TODO verify checksum from DB
 
