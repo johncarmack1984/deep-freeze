@@ -61,7 +61,7 @@ async fn get_authorization_code() {
     println!("🔑 Authorization code set");
 }
 
-async fn refresh_token(http: &HTTPClient) -> String {
+pub async fn refresh_token(http: &HTTPClient) -> String {
     println!("🔑 Refreshing access token...");
     let mut headers = HeaderMap::new();
     headers = http::dropbox_content_type_x_www_form_urlencoded_header(&mut headers);

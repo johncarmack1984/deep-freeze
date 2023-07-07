@@ -23,6 +23,9 @@ struct Args {
     /// Dropbox access token
     #[arg(long, default_value = "")]
     access_token: String,
+    /// Refresh the Dropbox access token, then exit (useful for CI)
+    #[arg(long, default_value = "false")]
+    auth_only: bool,
     /// AWS access key ID
     #[arg(long, default_value = "")]
     aws_access_key_id: String,
@@ -162,6 +165,13 @@ async fn init(args: Args) -> (DBConnection, HTTPClient, AWSClient) {
     }
 
     let http: HTTPClient = http::new_client();
+
+    if args.auth_only {
+        auth::refresh_token(&http).await;
+        println!("✅  Exiting");
+        process::exit(0)
+    }
+
     let aws: AWSClient = aws::new_client().await;
 
     if env::var("AWS_S3_BUCKET").is_err() {

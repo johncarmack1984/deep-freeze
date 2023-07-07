@@ -22,5 +22,7 @@ jobs:
         echo "${{ secrets.ENV_FILE }}" > .env    
     - name: Build
       run: cargo build --verbose
+    - name: Authorize CI Runner to use the API
+      run: cargo run -- --auth-only
     - name: Run tests
       run: cargo test --verbose

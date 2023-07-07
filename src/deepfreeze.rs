@@ -1,3 +1,4 @@
+use crate::auth;
 use crate::aws;
 use crate::db;
 use crate::db::DBConnection;
@@ -17,6 +18,7 @@ pub async fn perform_migration(
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     print!("\n🧊  Performing migration...\n\n\n\n");
     let m = progress::new_multi_progress();
+    auth::refresh_token(&http).await;
     for row in sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
