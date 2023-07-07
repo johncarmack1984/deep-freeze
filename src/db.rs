@@ -24,28 +24,42 @@ pub fn reset(dbpath: &str) {
 
 pub fn report_status(sqlite: &ConnectionWithFullMutex) {
     let total_rows = count_rows(&sqlite);
-    let total_size = get_pretty_total_size(&sqlite);
-    println!("🗃️   Total: {total_rows} files ({total_size})");
+    let total_size = get_total_size(&sqlite);
     let migrated_rows = count_migrated(&sqlite);
-    let migrated_size = get_pretty_migrated_size(&sqlite);
-    if migrated_rows > 0 {
-        println!("🪺  Migrated: {migrated_rows} files ({migrated_size})");
-    }
+    let migrated_size = get_migrated_size(&sqlite);
+    let unmigrated_size = get_unmigrated_size(&sqlite);
     let unmigrated_rows = total_rows - migrated_rows;
-    let unmigrated_size: String = get_pretty_unmigrated_size(sqlite);
-    println!("🪹  Remaining: {unmigrated_rows} files ({unmigrated_size})");
+
     let percent = if migrated_rows > 0 {
-        (100 * migrated_rows / total_rows).abs()
+        (100 * migrated_size / total_size).abs()
     } else {
         0
     };
+
+    println!(
+        "🗃️   Total: {total_rows} files ({})",
+        HumanBytes(total_size as u64)
+    );
+
+    if migrated_rows > 0 {
+        println!(
+            "🪺  Migrated: {migrated_rows} files ({})",
+            HumanBytes(migrated_size as u64)
+        );
+    }
+
+    println!(
+        "🪹  Remaining: {unmigrated_rows} files ({})",
+        HumanBytes(unmigrated_size as u64)
+    );
+
     match percent {
         0 => println!("🤷 {percent}% done"),
         100 => {
             println!("🎉 All files migrated");
             std::process::exit(0);
         }
-        _ => println!("🎉  {percent}% done!"),
+        _ => print!("🎉  {percent}% done!\n\n"),
     }
 }
 
@@ -67,18 +81,18 @@ pub fn init(connection: &ConnectionWithFullMutex) {
             );
             CREATE TABLE IF NOT EXISTS user (
                 dropbox_user_id TEXT UNIQUE NOT NULL,
-                dropbox_team_member_id TEXT NOT NULL,
-                dropbox_email TEXT NOT NULL,
-                dropbox_refresh_token TEXT NOT NULL,
-                dropbox_access_token TEXT NOT NULL,
-                dropbox_authorization_code TEXT NOT NULL,
-                dropbox_root_namespace_id STRING NOT NULL,
-                dropbox_home_namespace_id STRING NOT NULL,
-                aws_access_key_id TEXT NOT NULL,
-                aws_secret_access_key TEXT NOT NULL
+                dropbox_team_member_id TEXT UNIQUE NOT NULL,
+                dropbox_email TEXT UNIQUE NOT NULL,
+                dropbox_refresh_token TEXT UNIQUE NOT NULL,
+                dropbox_access_token TEXT UNIQUE NOT NULL,
+                dropbox_authorization_code TEXT UNIQUE NOT NULL,
+                dropbox_root_namespace_id STRING UNIQUE NOT NULL,
+                dropbox_home_namespace_id STRING UNIQUE NOT NULL,
+                aws_access_key_id TEXT UNIQUE NOT NULL,
+                aws_secret_access_key TEXT UNIQUE NOT NULL
             );
             CREATE TABLE IF NOT EXISTS config (
-                dropbox_base_folder,
+                dropbox_base_folder TEXT,
                 s3_bucket TEXT,
                 aws_region TEXT
             );
@@ -202,9 +216,8 @@ pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
 }
 
 pub fn count_rows(connection: &ConnectionWithFullMutex) -> i64 {
-    let query = "SELECT COUNT(*) FROM paths";
     connection
-        .prepare(query)
+        .prepare("SELECT COUNT(*) FROM paths")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
@@ -225,10 +238,9 @@ pub fn count_migrated(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
-    let query = "SELECT COUNT(*) FROM paths WHERE migrated < 1";
+pub fn _count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
     connection
-        .prepare(query)
+        .prepare("SELECT COUNT(*) FROM paths WHERE migrated < 1")
         .unwrap()
         .into_iter()
         .map(|row| row.unwrap())
@@ -264,69 +276,45 @@ pub fn set_skip(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     }
 }
 
-pub fn get_pretty_total_size(connection: &ConnectionWithFullMutex) -> String {
-    let size: f64;
-    if count_rows(connection) == 0 {
-        size = 0.0;
-    } else {
-        let query = "SELECT SUM(dropbox_size) FROM paths";
-        size = connection
-            .prepare(query)
-            .unwrap()
-            .into_iter()
-            .map(|row| row.unwrap())
-            .map(|row| row.read::<i64, _>(0))
-            .next()
-            .unwrap() as f64;
-    }
-    match size {
-        size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => HumanBytes(size as u64).to_string(),
-        _ => panic!("❌  Negative size"),
+pub fn get_total_size(connection: &DBConnection) -> i64 {
+    match connection
+        .prepare("SELECT SUM(dropbox_size) FROM paths")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+    {
+        Some(size) => size as i64,
+        None => 0,
     }
 }
 
-pub fn get_pretty_migrated_size(connection: &ConnectionWithFullMutex) -> String {
-    let size: f64;
-    if count_migrated(connection) == 0 {
-        size = 0.0;
-    } else {
-        let query = "SELECT SUM(dropbox_size) FROM paths WHERE migrated = 1";
-        size = connection
-            .prepare(query)
-            .unwrap()
-            .into_iter()
-            .map(|row| row.unwrap())
-            .map(|row| row.read::<i64, _>(0))
-            .next()
-            .unwrap() as f64;
-    }
-    match size {
-        size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => HumanBytes(size as u64).to_string(),
-        _ => panic!("❌  Negative size"),
+pub fn get_migrated_size(connection: &ConnectionWithFullMutex) -> i64 {
+    match connection
+        .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated = 1")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+    {
+        Some(size) => size,
+        None => 0,
     }
 }
 
-pub fn get_pretty_unmigrated_size(connection: &ConnectionWithFullMutex) -> String {
-    let size: f64;
-    if count_unmigrated(connection) == 0 {
-        size = 0.0;
-    } else {
-        let query = "SELECT SUM(dropbox_size) FROM paths WHERE migrated < 1";
-        size = connection
-            .prepare(query)
-            .unwrap()
-            .into_iter()
-            .map(|row| row.unwrap())
-            .map(|row| row.read::<i64, _>(0))
-            .next()
-            .unwrap() as f64;
-    }
-    match size {
-        size if size == 0.0 => "0 bytes".to_string(),
-        size if size > 0.0 => HumanBytes(size as u64).to_string(),
-        _ => panic!("❌  Negative size"),
+pub fn get_unmigrated_size(connection: &ConnectionWithFullMutex) -> i64 {
+    match connection
+        .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated < 1")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .map(|row| row.read::<i64, _>(0))
+        .next()
+    {
+        Some(size) => size,
+        None => 0,
     }
 }
 
@@ -341,13 +329,3 @@ pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) 
         .next()
         .unwrap()
 }
-
-// pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
-//     let query = "SELECT * FROM paths WHERE migrated < 1";
-//     connection
-//         .prepare(query)
-//         .unwrap()
-//         .into_iter()
-//         .map(|row| row.unwrap())
-//         .collect::<Vec<_>>()
-// }

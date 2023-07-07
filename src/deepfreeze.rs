@@ -45,7 +45,7 @@ pub async fn perform_migration(
     }
     db::report_status(&sqlite);
     if getenv("CHECK_ONLY") == "true" {
-        print!("\n\n✅  Exiting\n\n");
+        println!("✅  Exiting");
         std::process::exit(0);
     }
     println!("");
