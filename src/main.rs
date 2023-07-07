@@ -1,3 +1,5 @@
+#![allow(dead_code, unused)]
+
 mod auth;
 mod aws;
 mod cli;

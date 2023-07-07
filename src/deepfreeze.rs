@@ -41,11 +41,8 @@ pub async fn perform_migration(
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
         .into_iter()
-        // .map(|row| row.unwrap());
         .map(|row| async {
-            // auth::refresh_token(&http).await;
             let dropbox_id = row
-                // .as_ref()
                 .unwrap()
                 .try_read::<&str, &str>("dropbox_id")
                 .unwrap()
@@ -61,7 +58,6 @@ pub async fn perform_migration(
                 println!("✅ Skipping {dropbox_id}");
             } else {
                 tokio::task::spawn(async move {
-                    // println!("{dropbox_id}");
                     println!("📂  Migrating {dropbox_id}");
                     // dbg!(&http);
                     // dbg!(&aws);
@@ -71,15 +67,16 @@ pub async fn perform_migration(
                     //     .await
                     //     .unwrap();
                 });
+                // auth::refresh_token(&http).await;
             }
         })
         .collect();
     for row in rows {
         row.await;
     }
-    // m.clear().unwrap();
+    m.clear().unwrap();
     println!("✨ Done in {}", HumanDuration(started.elapsed()));
-    // db::report_status(&sqlite);
+    db::report_status(&sqlite);
     if getenv("CHECK_ONLY") == "true" {
         println!("✅  Exiting");
         std::process::exit(0);
@@ -96,75 +93,75 @@ async fn migrate_file_to_s3(
     m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let row: Row = db::get_row(&sqlite, &dropbox_id);
-    // let dropbox_id = row
-    //     .try_read::<&str, &str>("dropbox_id")
-    //     .unwrap()
-    //     .to_string();
+    let dropbox_id = row
+        .try_read::<&str, &str>("dropbox_id")
+        .unwrap()
+        .to_string();
 
-    // match check_migration_status(&aws, &sqlite, &row).await {
-    //     0 => match getenv("CHECK_ONLY").as_str() {
-    //         "true" => {
-    //             print!("\n\n");
-    //             return Ok(());
-    //         }
-    //         _ => (),
-    //     },
-    //     1 => return Ok(()),
-    //     err => {
-    //         dbg!("err");
-    //         println!("❌  Unknown migration status {err}");
-    //         db::set_skip(&sqlite, &dropbox_id);
-    //         return Ok(());
-    //     }
-    // };
+    match check_migration_status(&aws, &sqlite, &row).await {
+        0 => match getenv("CHECK_ONLY").as_str() {
+            "true" => {
+                print!("\n\n");
+                return Ok(());
+            }
+            _ => (),
+        },
+        1 => return Ok(()),
+        err => {
+            dbg!("err");
+            println!("❌  Unknown migration status {err}");
+            db::set_skip(&sqlite, &dropbox_id);
+            return Ok(());
+        }
+    };
 
-    // let dropbox_path = row
-    //     .try_read::<&str, &str>("dropbox_path")
-    //     .unwrap()
-    //     .to_string();
-    // let key = util::standardize_path(&dropbox_path);
-    // let bucket = env::var("AWS_S3_BUCKET").unwrap();
+    let dropbox_path = row
+        .try_read::<&str, &str>("dropbox_path")
+        .unwrap()
+        .to_string();
+    let key = util::standardize_path(&dropbox_path);
+    let bucket = env::var("AWS_S3_BUCKET").unwrap();
 
-    // // println!("📂  Migrating {key}");
+    // println!("📂  Migrating {key}");
 
-    // let local_path = format!("./temp/{key}");
+    let local_path = format!("./temp/{key}");
 
-    // dropbox::download_from_dropbox(&http, &dropbox_id, &dropbox_path, &local_path, &m)
-    //     .await
-    //     .unwrap();
+    dropbox::download_from_dropbox(&http, &dropbox_id, &dropbox_path, &local_path, &m)
+        .await
+        .unwrap();
 
-    // // TODO verify checksum from DB
+    // TODO verify checksum from DB
 
-    // match aws::upload_to_s3(&aws, &key, &local_path, &bucket, &m).await {
-    //     Ok(_) => (),
-    //     Err(err) => {
-    //         println!("🚫  {err}");
-    //         db::set_unmigrated(&sqlite, &dropbox_id);
-    //         // localfs::delete_local_file(&local_path);
-    //         db::set_skip(&sqlite, &dropbox_id);
-    //     }
-    // }
+    match aws::upload_to_s3(&aws, &key, &local_path, &bucket, &m).await {
+        Ok(_) => (),
+        Err(err) => {
+            println!("🚫  {err}");
+            db::set_unmigrated(&sqlite, &dropbox_id);
+            // localfs::delete_local_file(&local_path);
+            db::set_skip(&sqlite, &dropbox_id);
+        }
+    }
 
-    // // TODO create checksum from file for AWS
+    // TODO create checksum from file for AWS
 
-    // match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_id, &key).await {
-    //     Ok(_) => (),
-    //     Err(err) => {
-    //         println!("🚫  {err}");
-    //         db::set_unmigrated(&sqlite, &dropbox_id);
-    //         localfs::delete_local_file(&local_path);
-    //         match aws::delete_from_s3(&aws, &bucket, &key).await {
-    //             Ok(_) => println!("🗑️  Deleted s3://{bucket}/{key}"),
-    //             Err(err) => println!("🚫  {err}"),
-    //         };
-    //     }
-    // }
+    match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_id, &key).await {
+        Ok(_) => (),
+        Err(err) => {
+            println!("🚫  {err}");
+            db::set_unmigrated(&sqlite, &dropbox_id);
+            localfs::delete_local_file(&local_path);
+            match aws::delete_from_s3(&aws, &bucket, &key).await {
+                Ok(_) => println!("🗑️  Deleted s3://{bucket}/{key}"),
+                Err(err) => println!("🚫  {err}"),
+            };
+        }
+    }
 
-    // // // TODO verify checksum from S3
+    // // TODO verify checksum from S3
 
-    // db::set_migrated(&sqlite, &dropbox_id);
-    // localfs::delete_local_file(&local_path);
-    // print!("\n\n");
+    db::set_migrated(&sqlite, &dropbox_id);
+    localfs::delete_local_file(&local_path);
+    print!("\n\n");
     return Ok(());
 }
 
@@ -209,28 +206,3 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         },
     }
 }
-
-// .collect::<Vec<sqlite::Row>>();
-// for row in sqlite
-//     .prepare("SELECT * FROM paths WHERE migrated < 1")
-//     .unwrap()
-//     .into_iter()
-//     .map(|row| row.unwrap())
-// {
-// filter for skip here
-//     let filter = |&i| i == dropbox_id;
-//     if env::var("SKIP_ARRAY")
-//         .unwrap_or("".to_string())
-//         .split(',')
-//         .collect::<Vec<&str>>()
-//         .iter()
-//         .any(filter)
-//     {
-//         println!("✅ Skipping {dropbox_id}");
-//         continue;
-//     } else {
-//         migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
-//             .await
-//             .unwrap();
-//     }
-// }

@@ -338,3 +338,14 @@ pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::
         .map(|row| row.unwrap())
         .collect::<Vec<_>>()
 }
+
+pub fn get_row(connection: &ConnectionWithFullMutex, dropbox_id: &str) -> sqlite::Row {
+    let query = format!("SELECT * FROM paths WHERE dropbox_id = '{dropbox_id}';");
+    connection
+        .prepare(&query)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.unwrap())
+        .next()
+        .unwrap()
+}
