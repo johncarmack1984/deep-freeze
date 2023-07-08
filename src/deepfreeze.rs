@@ -1,9 +1,8 @@
 use crate::auth;
 use crate::aws;
-use crate::db;
-use crate::db::DBConnection;
-use crate::db::Row;
+use crate::db::{self, DBConnection, Row};
 use crate::dropbox;
+use crate::http::HTTPClient;
 use crate::localfs;
 use crate::progress;
 use crate::util;
@@ -17,8 +16,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::progress::{MultiProgress, ProgressStyle};
 use console::{style, Emoji};
-use indicatif::{HumanDuration, MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::HumanDuration;
 use rand::seq::SliceRandom;
 use rand::Rng;
 
@@ -29,8 +29,8 @@ static MIGRATION_STEPS: &[&str] = &[
 ];
 
 pub async fn perform_migration(
-    http: reqwest::Client,
-    database: db::DBConnection,
+    http: HTTPClient,
+    database: DBConnection,
     aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     print!("\n🧊  Performing migration...\n\n\n\n");
@@ -48,6 +48,7 @@ pub async fn perform_migration(
                 .to_string();
             let filter = |i| i == dropbox_id;
             if env::var("SKIP")
+                .to_owned()
                 .unwrap_or("".to_string())
                 .split(',')
                 .collect::<Vec<&str>>()
@@ -58,13 +59,15 @@ pub async fn perform_migration(
             } else {
                 tokio::task::spawn(async move {
                     println!("📂  Migrating {dropbox_id}");
-                    // dbg!(&http);
+                    // dbg!(&http.to_owned());
                     // dbg!(&aws);
+                    // dbg!(database);
                     // dbg!(database.change_count());
                     // dbg!(row);
                     // migrate_file_to_s3(&dropbox_id, &http, &aws, database, &m)
                     //     .await
                     //     .unwrap();
+                    // row
                 });
                 // auth::refresh_token(&http).await;
             }
@@ -86,10 +89,10 @@ pub async fn perform_migration(
 
 async fn migrate_file_to_s3(
     dropbox_id: &str,
-    http: &reqwest::Client,
+    http: &HTTPClient,
     aws: &AWSClient,
-    database: db::DBConnection,
-    m: &crate::progress::MultiProgress,
+    database: DBConnection,
+    m: &MultiProgress,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let row: db::Row = db::get_row(&database, &dropbox_id);
     let dropbox_id = row
