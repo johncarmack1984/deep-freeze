@@ -43,7 +43,9 @@ pub async fn perform_migration(
         .into_iter()
         .map(|row| async move {
             {
+                let row = row.borrow();
                 let dropbox_id = row
+                    .as_ref()
                     .unwrap()
                     // .borrow()
                     .try_read::<&str, &str>("dropbox_id")
@@ -59,7 +61,7 @@ pub async fn perform_migration(
                     .any(filter)
                 {
                     println!("✅ Skipping {dropbox_id}");
-                    // db::set_skip(connection, dropbox_id);
+                    // db::set_skip(&database, &dropbox_id);
                 } else {
                     if getenv("CHECK_ONLY") != "true" {
                         // auth::refresh_token(&http).await;
@@ -87,8 +89,9 @@ pub async fn perform_migration(
         row.await;
     }
     m.clear().unwrap();
-    println!("✨ Done in {}", HumanDuration(started.elapsed()));
     db::report_status(&database);
+
+    println!("✨ Done in {}", HumanDuration(started.elapsed()));
     if getenv("CHECK_ONLY") == "true" {
         println!("✅  Exiting");
         std::process::exit(0);
