@@ -9,7 +9,9 @@ use crate::progress;
 use crate::util;
 use crate::util::getenv;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
+use indicatif::HumanDuration;
 use std::env;
+use std::time::Instant;
 
 pub async fn perform_migration(
     http: reqwest::Client,
@@ -17,6 +19,7 @@ pub async fn perform_migration(
     aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     print!("\n🧊  Performing migration...\n\n\n\n");
+    let started = Instant::now();
     let m = progress::new_multi_progress();
     for row in sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
@@ -48,6 +51,8 @@ pub async fn perform_migration(
         }
     }
     db::report_status(&sqlite);
+
+    println!("✨ Done in {}", HumanDuration(started.elapsed()));
     if getenv("CHECK_ONLY") == "true" {
         println!("✅  Exiting");
         std::process::exit(0);
