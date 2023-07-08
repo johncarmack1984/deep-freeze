@@ -2,17 +2,16 @@ use std::env;
 
 use indicatif::HumanBytes;
 use sedregex::find_and_replace;
-use sqlite::{self, ConnectionWithFullMutex};
+use sqlite;
 
 use crate::{json::JSON, util::setenv};
 
-pub type DBConnection = ConnectionWithFullMutex;
-pub type DBRow = sqlite::Row;
+pub type DBConnection = sqlite::ConnectionWithFullMutex;
+pub type Row = sqlite::Row;
 
-pub fn connect(dbpath: &str) -> ConnectionWithFullMutex {
-    let sqlite = sqlite::Connection::open_with_full_mutex(dbpath).unwrap();
-    init(&sqlite);
-    sqlite
+pub fn connect(dbpath: &str) -> DBConnection {
+    let database = sqlite::Connection::open_with_full_mutex(dbpath).unwrap();
+    init(database)
 }
 
 pub fn reset(dbpath: &str) {
@@ -21,12 +20,12 @@ pub fn reset(dbpath: &str) {
     }
 }
 
-pub fn report_status(sqlite: &ConnectionWithFullMutex) {
-    let total_rows = count_rows(&sqlite);
-    let total_size = get_total_size(&sqlite);
-    let migrated_rows = count_migrated(&sqlite);
-    let migrated_size = get_migrated_size(&sqlite);
-    let unmigrated_size = get_unmigrated_size(&sqlite);
+pub fn report_status(database: &DBConnection) {
+    let total_rows = count_rows(&database);
+    let total_size = get_total_size(&database);
+    let migrated_rows = count_migrated(&database);
+    let migrated_size = get_migrated_size(&database);
+    let unmigrated_size = get_unmigrated_size(&database);
     let unmigrated_rows = total_rows - migrated_rows;
 
     let percent = if migrated_rows > 0 {
@@ -62,8 +61,8 @@ pub fn report_status(sqlite: &ConnectionWithFullMutex) {
     }
 }
 
-pub fn init(connection: &ConnectionWithFullMutex) {
-    match connection.execute(
+pub fn init(database: DBConnection) -> DBConnection {
+    match database.execute(
         "
             CREATE TABLE IF NOT EXISTS paths (
                 dropbox_id TEXT PRIMARY KEY,
@@ -97,7 +96,10 @@ pub fn init(connection: &ConnectionWithFullMutex) {
             );
             ",
     ) {
-        Ok(_) => println!("📁  Database initialized"),
+        Ok(_) => {
+            println!("📁  Database initialized");
+            database
+        }
         Err(err) => panic!("❌  {err}"),
     }
 }
@@ -147,7 +149,7 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .to_owned()
 }
 
-pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
+pub fn insert_config(database: &DBConnection) {
     let dropbox_base_folder = env::var("DROPBOX_BASE_FOLDER").unwrap_or(String::new());
     let s3_bucket = env::var("S3_BUCKET").unwrap_or(String::new());
     let aws_region = env::var("AWS_REGION").unwrap_or(String::new());
@@ -155,7 +157,7 @@ pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
         "INSERT OR REPLACE INTO config (dropbox_base_folder, s3_bucket, aws_region) VALUES ('{}', '{}', '{}');",
         dropbox_base_folder, s3_bucket, aws_region
     );
-    match sqlite.execute(&statement) {
+    match database.execute(&statement) {
         Ok(_) => print!("\n📁  Configuration updated\n\n"),
         Err(err) => {
             println!("❌  Error in statement: {statement}");
@@ -164,7 +166,7 @@ pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
     }
 }
 
-pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
+pub fn insert_user(connection: &DBConnection, member: &JSON) {
     let dropbox_user_id = member.get("account_id").unwrap().as_str().unwrap();
     let dropbox_team_member_id = member.get("team_member_id").unwrap().as_str().unwrap();
     setenv("DROPBOX_TEAM_MEMBER_ID", dropbox_team_member_id.to_string());
@@ -214,7 +216,7 @@ pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
     }
 }
 
-pub fn count_rows(connection: &ConnectionWithFullMutex) -> i64 {
+pub fn count_rows(connection: &DBConnection) -> i64 {
     connection
         .prepare("SELECT COUNT(*) FROM paths")
         .unwrap()
@@ -225,7 +227,7 @@ pub fn count_rows(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn count_migrated(connection: &ConnectionWithFullMutex) -> i64 {
+pub fn count_migrated(connection: &DBConnection) -> i64 {
     let query = "SELECT COUNT(*) FROM paths WHERE migrated = 1";
     connection
         .prepare(query)
@@ -237,7 +239,7 @@ pub fn count_migrated(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn _count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
+pub fn _count_unmigrated(connection: &DBConnection) -> i64 {
     connection
         .prepare("SELECT COUNT(*) FROM paths WHERE migrated < 1")
         .unwrap()
@@ -248,7 +250,7 @@ pub fn _count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn set_migrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
+pub fn set_migrated(connection: &DBConnection, dropbox_id: &str) {
     match connection.execute(format!(
         "UPDATE paths SET migrated = 1 WHERE dropbox_id = '{dropbox_id}';",
     )) {
@@ -257,7 +259,7 @@ pub fn set_migrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     }
 }
 
-pub fn set_unmigrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
+pub fn set_unmigrated(connection: &DBConnection, dropbox_id: &str) {
     match connection.execute(format!(
         "UPDATE paths SET migrated = 0 WHERE dropbox_id = '{dropbox_id}';",
     )) {
@@ -266,7 +268,7 @@ pub fn set_unmigrated(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
     }
 }
 
-pub fn set_skip(connection: &ConnectionWithFullMutex, dropbox_id: &str) {
+pub fn set_skip(connection: &DBConnection, dropbox_id: &str) {
     match connection.execute(format!(
         "UPDATE paths SET skip = 1 WHERE dropbox_id = '{dropbox_id}';",
     )) {
@@ -289,7 +291,7 @@ pub fn get_total_size(connection: &DBConnection) -> i64 {
     }
 }
 
-pub fn get_migrated_size(connection: &ConnectionWithFullMutex) -> i64 {
+pub fn get_migrated_size(connection: &DBConnection) -> i64 {
     match connection
         .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated = 1")
         .unwrap()
@@ -303,7 +305,7 @@ pub fn get_migrated_size(connection: &ConnectionWithFullMutex) -> i64 {
     }
 }
 
-pub fn get_unmigrated_size(connection: &ConnectionWithFullMutex) -> i64 {
+pub fn get_unmigrated_size(connection: &DBConnection) -> i64 {
     match connection
         .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated < 1")
         .unwrap()
@@ -317,7 +319,7 @@ pub fn get_unmigrated_size(connection: &ConnectionWithFullMutex) -> i64 {
     }
 }
 
-pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) -> i64 {
+pub fn get_dropbox_size(connection: &DBConnection, dropbox_id: &str) -> i64 {
     let query = format!("SELECT dropbox_size FROM paths WHERE dropbox_id = '{dropbox_id}';");
     connection
         .prepare(&query)
@@ -329,7 +331,7 @@ pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) 
         .unwrap()
 }
 
-pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::Row> {
+pub fn get_unmigrated_rows(connection: &DBConnection) -> Vec<Row> {
     let query = "SELECT * FROM paths WHERE migrated < 1 AND skip < 1";
     connection
         .prepare(query)
@@ -339,7 +341,7 @@ pub fn get_unmigrated_rows(connection: &ConnectionWithFullMutex) -> Vec<sqlite::
         .collect::<Vec<_>>()
 }
 
-pub fn get_row(connection: &ConnectionWithFullMutex, dropbox_id: &str) -> sqlite::Row {
+pub fn get_row(connection: &DBConnection, dropbox_id: &str) -> Row {
     let query = format!("SELECT * FROM paths WHERE dropbox_id = '{dropbox_id}';");
     connection
         .prepare(&query)
