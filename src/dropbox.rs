@@ -165,7 +165,7 @@ pub async fn get_dropbox_size(http: &HTTPClient, dropbox_path: &str) -> i64 {
 }
 
 pub async fn download_from_dropbox(
-    http: &reqwest::Client,
+    http: &HTTPClient,
     dropbox_id: &str,
     _dropbox_path: &str,
     local_path: &str,
