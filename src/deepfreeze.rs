@@ -10,6 +10,7 @@ use crate::util::getenv;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use futures_util::FutureExt;
 use futures_util::__private::async_await;
+use std::borrow::Borrow;
 use std::env;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -41,35 +42,44 @@ pub async fn perform_migration(
         .unwrap()
         .into_iter()
         .map(|row| async move {
-            let dropbox_id = row
-                .unwrap()
-                .try_read::<&str, &str>("dropbox_id")
-                .unwrap()
-                .to_string();
-            let filter = |i| i == dropbox_id;
-            if env::var("SKIP")
-                .to_owned()
-                .unwrap_or("".to_string())
-                .split(',')
-                .collect::<Vec<&str>>()
-                .into_iter()
-                .any(filter)
             {
-                println!("✅ Skipping {dropbox_id}");
-            } else {
-                tokio::task::spawn(async move {
-                    println!("📂  Migrating {dropbox_id}");
-                    // dbg!(&http.to_owned());
-                    // dbg!(&aws);
-                    // dbg!(database);
-                    // dbg!(database.change_count());
-                    // dbg!(row);
-                    // migrate_file_to_s3(&dropbox_id, &http, &aws, database, &m)
-                    //     .await
-                    //     .unwrap();
-                    // row
-                });
-                // auth::refresh_token(&http).await;
+                let dropbox_id = row
+                    .unwrap()
+                    // .borrow()
+                    .try_read::<&str, &str>("dropbox_id")
+                    .unwrap()
+                    .to_string();
+                let filter = |i| i == dropbox_id;
+                if env::var("SKIP")
+                    .to_owned()
+                    .unwrap_or("".to_string())
+                    .split(',')
+                    .collect::<Vec<&str>>()
+                    .into_iter()
+                    .any(filter)
+                {
+                    println!("✅ Skipping {dropbox_id}");
+                    // db::set_skip(connection, dropbox_id);
+                } else {
+                    if getenv("CHECK_ONLY") != "true" {
+                        // auth::refresh_token(&http).await;
+                    }
+                    tokio::task::spawn(async move {
+                        println!("📂  Migrating {dropbox_id}");
+                        // dbg!(&http.to_owned());
+                        // dbg!(&aws);
+                        // dbg!(database);
+                        // dbg!(database.change_count());
+                        // dbg!(row);
+                        // migrate_file_to_s3(&dropbox_id, &http, &aws, database, &m)
+                        //     .await
+                        //     .unwrap();
+                        // row
+                        // migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
+                        //     .await
+                        //     .unwrap();
+                    });
+                }
             }
         })
         .collect();
