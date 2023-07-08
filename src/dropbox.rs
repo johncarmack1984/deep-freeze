@@ -84,7 +84,7 @@ async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
         .unwrap()
 }
 
-pub async fn choose_folder(http: &HTTPClient, sqlite: &DBConnection) {
+pub async fn choose_folder(http: &HTTPClient, database: &DBConnection) {
     let recursive = false;
     let res = list_folder(&http, recursive).await;
     let json: JSON = json::from_res(&res);
@@ -103,7 +103,7 @@ pub async fn choose_folder(http: &HTTPClient, sqlite: &DBConnection) {
         Ok(choice) => {
             println!("🗄️  You chose {choice}");
             setenv("DROPBOX_BASE_FOLDER", choice);
-            db::insert_config(&sqlite);
+            db::insert_config(&database);
         }
         Err(err) => panic!("❌  Error choosing folder {err}"),
     }

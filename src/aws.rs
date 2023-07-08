@@ -79,7 +79,7 @@ pub async fn list_buckets(
     }
 }
 
-pub async fn choose_bucket(client: &Client, sqlite: &DBConnection) {
+pub async fn choose_bucket(client: &Client, database: &DBConnection) {
     let buckets = list_buckets(&client).await.unwrap();
     let bucket_names = buckets
         .buckets
@@ -113,7 +113,7 @@ pub async fn choose_bucket(client: &Client, sqlite: &DBConnection) {
             // } else {
             //     setenv("AWS_S3_BUCKET_ACCELERATION", "false".to_string());
             // }
-            db::insert_config(&sqlite);
+            db::insert_config(&database);
         }
         Err(err) => panic!("❌  Error choosing folder {err}"),
     }
@@ -405,7 +405,7 @@ pub async fn upload_to_s3(
 }
 
 pub async fn confirm_upload_size(
-    sqlite: &sqlite::ConnectionWithFullMutex,
+    database: &DBConnection,
     aws: &Client,
     bucket: &str,
     dropbox_id: &str,
@@ -413,7 +413,7 @@ pub async fn confirm_upload_size(
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let s3_attrs: GetObjectAttributesOutput = get_s3_attrs(&aws, &bucket, &key).await?;
     let s3_size = s3_attrs.object_size();
-    let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_id);
+    let dropbox_size = db::get_dropbox_size(&database, &dropbox_id);
     match s3_size == dropbox_size {
         true => return Ok(()),
         false => {

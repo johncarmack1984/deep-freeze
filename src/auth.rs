@@ -138,7 +138,7 @@ async fn handle_auth_error(http: &HTTPClient, res: String) -> String {
     }
 }
 
-async fn select_team_member(http: &HTTPClient, sqlite: &DBConnection) {
+async fn select_team_member(http: &HTTPClient, database: &DBConnection) {
     let res = dropbox::get_team_members_list(&http).await;
     // println!("println res {:?}", res);
     let json = json::from_res(&res);
@@ -175,7 +175,7 @@ async fn select_team_member(http: &HTTPClient, sqlite: &DBConnection) {
                 .unwrap()
                 .get("profile")
                 .unwrap();
-            db::insert_user(sqlite, member);
+            db::insert_user(database, member);
         }
         Err(_) => {
             println!("🚫  Error selecting team member");
@@ -184,17 +184,17 @@ async fn select_team_member(http: &HTTPClient, sqlite: &DBConnection) {
     }
 }
 
-pub async fn check_account(http: &HTTPClient, sqlite: &DBConnection) {
+pub async fn check_account(http: &HTTPClient, database: &DBConnection) {
     if dotenv::var("DROPBOX_REFRESH_TOKEN").is_err() {
         login(http).await;
     }
     if dotenv::var("DROPBOX_TEAM_MEMBER_ID").is_err() {
-        select_team_member(http, sqlite).await;
+        select_team_member(http, database).await;
     }
     print!("\n🪪  Checking account...\n");
     let res = get_current_account(&http).await;
     let json = json::from_res(&res);
-    db::insert_user(sqlite, &json);
+    db::insert_user(database, &json);
     print!(
         "👤  Logged in as {}\n\n",
         &json.get("email").unwrap().as_str().unwrap()
