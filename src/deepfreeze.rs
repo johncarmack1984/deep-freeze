@@ -2,7 +2,7 @@ use crate::auth;
 use crate::aws;
 use crate::db;
 use crate::db::DBConnection;
-use crate::db::DBRow;
+use crate::db::Row;
 use crate::dropbox;
 use crate::localfs;
 use crate::progress;
@@ -11,7 +11,6 @@ use crate::util::getenv;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use futures_util::FutureExt;
 use futures_util::__private::async_await;
-use sqlite::Row;
 use std::env;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -31,28 +30,28 @@ static MIGRATION_STEPS: &[&str] = &[
 
 pub async fn perform_migration(
     http: reqwest::Client,
-    sqlite: sqlite::ConnectionWithFullMutex,
+    database: db::DBConnection,
     aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     print!("\n🧊  Performing migration...\n\n\n\n");
     let m = progress::new_multi_progress();
     let started = Instant::now();
-    let rows: Vec<_> = sqlite
+    let rows: Vec<_> = database
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
         .into_iter()
-        .map(|row| async {
+        .map(|row| async move {
             let dropbox_id = row
                 .unwrap()
                 .try_read::<&str, &str>("dropbox_id")
                 .unwrap()
                 .to_string();
-            let filter = |&i| i == dropbox_id;
+            let filter = |i| i == dropbox_id;
             if env::var("SKIP")
                 .unwrap_or("".to_string())
                 .split(',')
                 .collect::<Vec<&str>>()
-                .iter()
+                .into_iter()
                 .any(filter)
             {
                 println!("✅ Skipping {dropbox_id}");
@@ -61,9 +60,9 @@ pub async fn perform_migration(
                     println!("📂  Migrating {dropbox_id}");
                     // dbg!(&http);
                     // dbg!(&aws);
-                    // dbg!(&sqlite);
+                    // dbg!(database.change_count());
                     // dbg!(row);
-                    // migrate_file_to_s3(&dropbox_id, &http, &aws, sqlite, &m)
+                    // migrate_file_to_s3(&dropbox_id, &http, &aws, database, &m)
                     //     .await
                     //     .unwrap();
                 });
@@ -76,7 +75,7 @@ pub async fn perform_migration(
     }
     m.clear().unwrap();
     println!("✨ Done in {}", HumanDuration(started.elapsed()));
-    db::report_status(&sqlite);
+    db::report_status(&database);
     if getenv("CHECK_ONLY") == "true" {
         println!("✅  Exiting");
         std::process::exit(0);
@@ -89,16 +88,16 @@ async fn migrate_file_to_s3(
     dropbox_id: &str,
     http: &reqwest::Client,
     aws: &AWSClient,
-    sqlite: sqlite::ConnectionWithFullMutex,
+    database: db::DBConnection,
     m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let row: Row = db::get_row(&sqlite, &dropbox_id);
+    let row: db::Row = db::get_row(&database, &dropbox_id);
     let dropbox_id = row
         .try_read::<&str, &str>("dropbox_id")
         .unwrap()
         .to_string();
 
-    match check_migration_status(&aws, &sqlite, &row).await {
+    match check_migration_status(&aws, &database, &row).await {
         0 => match getenv("CHECK_ONLY").as_str() {
             "true" => {
                 print!("\n\n");
@@ -110,7 +109,7 @@ async fn migrate_file_to_s3(
         err => {
             dbg!("err");
             println!("❌  Unknown migration status {err}");
-            db::set_skip(&sqlite, &dropbox_id);
+            db::set_skip(&database, &dropbox_id);
             return Ok(());
         }
     };
@@ -136,19 +135,19 @@ async fn migrate_file_to_s3(
         Ok(_) => (),
         Err(err) => {
             println!("🚫  {err}");
-            db::set_unmigrated(&sqlite, &dropbox_id);
+            db::set_unmigrated(&database, &dropbox_id);
             // localfs::delete_local_file(&local_path);
-            db::set_skip(&sqlite, &dropbox_id);
+            db::set_skip(&database, &dropbox_id);
         }
     }
 
     // TODO create checksum from file for AWS
 
-    match aws::confirm_upload_size(&sqlite, &aws, &bucket, &dropbox_id, &key).await {
+    match aws::confirm_upload_size(&database, &aws, &bucket, &dropbox_id, &key).await {
         Ok(_) => (),
         Err(err) => {
             println!("🚫  {err}");
-            db::set_unmigrated(&sqlite, &dropbox_id);
+            db::set_unmigrated(&database, &dropbox_id);
             localfs::delete_local_file(&local_path);
             match aws::delete_from_s3(&aws, &bucket, &key).await {
                 Ok(_) => println!("🗑️  Deleted s3://{bucket}/{key}"),
@@ -159,13 +158,13 @@ async fn migrate_file_to_s3(
 
     // // TODO verify checksum from S3
 
-    db::set_migrated(&sqlite, &dropbox_id);
+    db::set_migrated(&database, &dropbox_id);
     localfs::delete_local_file(&local_path);
     print!("\n\n");
     return Ok(());
 }
 
-async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DBRow) -> i64 {
+async fn check_migration_status(aws: &AWSClient, database: &DBConnection, row: &Row) -> i64 {
     let dropbox_path = row
         .try_read::<&str, &str>("dropbox_path")
         .unwrap()
@@ -183,7 +182,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         Err(err) => match err {
             AWSError::NoSuchKey(_) => {
                 println!("❌  Not found: s3:://{}/{}", bucket, key);
-                db::set_unmigrated(&sqlite, &dropbox_id);
+                db::set_unmigrated(&database, &dropbox_id);
                 0
             }
             _ => panic!("❌  {}", err),
@@ -191,7 +190,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
         Ok(s3_attrs) => match s3_attrs.object_size() == dropbox_size {
             true => {
                 println!("✅  Files the same size on DB & S3");
-                db::set_migrated(&sqlite, &dropbox_id);
+                db::set_migrated(&database, &dropbox_id);
                 localfs::delete_local_file(&local_path);
                 1
             }
@@ -200,7 +199,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
                 println!("🗳️  DB size: {dropbox_size}");
                 println!("🗂️  S3 size: {}", s3_attrs.object_size());
                 aws::delete_from_s3(&aws, &bucket, &key).await.unwrap();
-                db::set_unmigrated(&sqlite, &dropbox_id);
+                db::set_unmigrated(&database, &dropbox_id);
                 0
             }
         },
