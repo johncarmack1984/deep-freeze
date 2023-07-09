@@ -295,12 +295,12 @@ pub fn get_migrated_size(connection: &ConnectionWithFullMutex) -> i64 {
         .prepare("SELECT SUM(dropbox_size) FROM paths WHERE migrated = 1")
         .unwrap()
         .into_iter()
-        .map(|row| row.unwrap())
-        .map(|row| row.read::<i64, _>(0))
+        .map(|row| row.unwrap().try_read::<i64, _>(0))
         .next()
+        .unwrap()
     {
-        Some(size) => size,
-        None => 0,
+        Ok(size) => size,
+        Err(_) => 0,
     }
 }
 
