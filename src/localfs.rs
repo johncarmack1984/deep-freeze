@@ -57,7 +57,9 @@ pub async fn reset() {
 }
 
 async fn delete_local_dir(local_path: &str) {
-    fs::remove_dir_all(local_path).await.unwrap()
+    if local_file_exists(local_path).await {
+        fs::remove_dir_all(local_path).await.unwrap()
+    }
 }
 
 pub async fn get_local_file(local_path: &str) -> File {
