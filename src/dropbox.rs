@@ -1,14 +1,13 @@
 use futures_util::StreamExt;
 use std::cmp::min;
-use std::io::Write;
-use std::{env, error::Error};
+use tokio::io::AsyncWriteExt;
 
 use crate::db::{self, DBConnection};
 use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json::{self, JSON};
-use crate::localfs::{self, create_local_file};
+use crate::localfs;
 use crate::progress;
-use crate::util::setenv;
+use crate::util::{getenv, setenv};
 
 pub async fn add_files_to_list(
     json: &JSON,
@@ -49,11 +48,11 @@ async fn list_folder(http: &HTTPClient, recursive: bool) -> String {
     let mut headers = HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_select_user_header(&mut headers);
     headers = http::dropbox_api_path_root_header(&mut headers);
     let body = format!(
         "{{\"path\": \"{}\", \"recursive\": {},  \"limit\": 2000, \"include_non_downloadable_files\": false}}",
-        env::var("DROPBOX_BASE_FOLDER").unwrap_or("".to_string()), recursive
+        getenv("DROPBOX_BASE_FOLDER").unwrap_or("".to_string()), recursive
     );
     http.post("https://api.dropboxapi.com/2/files/list_folder")
         .headers(headers)
@@ -69,7 +68,7 @@ async fn list_folder(http: &HTTPClient, recursive: bool) -> String {
 async fn list_folder_continue(http: &HTTPClient, cursor: &String) -> String {
     let mut headers = HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_select_user_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
     headers = http::dropbox_api_path_root_header(&mut headers);
     let body = format!("{{\"cursor\": {cursor}}}");
@@ -102,22 +101,18 @@ pub async fn choose_folder(http: &HTTPClient, sqlite: &DBConnection) {
     {
         Ok(choice) => {
             println!("🗄️  You chose {choice}");
-            setenv("DROPBOX_BASE_FOLDER", choice);
+            setenv("DROPBOX_BASE_FOLDER", choice).await;
             db::insert_config(&sqlite);
         }
         Err(err) => panic!("❌  Error choosing folder {err}"),
     }
 }
 
-// #[async_recursion::async_recursion(?Send)]
 pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
     print!("🗄️   Getting file list...\n");
     let count = db::count_rows(&sqlite);
     if count == 0 {
         println!("🗄️  File list empty");
-        if dotenv::var("DROPBOX_BASE_FOLDER").is_err() {
-            choose_folder(http, sqlite).await;
-        }
         println!("🗄️  Populating file list...");
         let recursive = true;
         let mut res = list_folder(&http, recursive).await;
@@ -144,7 +139,7 @@ pub async fn get_paths(http: &HTTPClient, sqlite: &DBConnection) {
 pub async fn get_file_metadata(http: &HTTPClient, dropbox_path: &str) -> String {
     let mut headers = HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_select_user_header(&mut headers);
     headers = http::dropbox_content_type_json_header(&mut headers);
     let body = format!("{{\"path\": \"{dropbox_path}\"}}");
     http.post("https://api.dropboxapi.com/2/files/get_metadata")
@@ -170,11 +165,11 @@ pub async fn download_from_dropbox(
     _dropbox_path: &str,
     local_path: &str,
     m: &&crate::progress::MultiProgress,
-) -> Result<(), Box<dyn Error>> {
+) {
     let dropbox_size = get_dropbox_size(http, dropbox_id).await;
     let mut headers = HeaderMap::new();
     headers = http::dropbox_authorization_header(&mut headers);
-    headers = http::dropbox_select_admin_header(&mut headers);
+    headers = http::dropbox_select_user_header(&mut headers);
     headers.insert(
         "Dropbox-API-Arg",
         format!("{{\"path\":\"{dropbox_id}\"}}").parse().unwrap(),
@@ -183,26 +178,29 @@ pub async fn download_from_dropbox(
         .post("https://content.dropboxapi.com/2/files/download")
         .headers(headers)
         .send()
-        .await?;
+        .await
+        .unwrap();
     let mut stream = res.bytes_stream();
-    let mut file;
+    let mut file: tokio::fs::File;
     let mut downloaded: u64 = 0;
     let pb = m.add(progress::new(dropbox_size as u64, "file_transfer"));
     pb.set_prefix("⬇️   Download  ");
-    if localfs::get_local_size(&local_path) != dropbox_size {
-        file = create_local_file(&local_path);
+    if localfs::get_local_size(&local_path).await != dropbox_size {
+        localfs::delete_local_file(local_path).await;
+        file = localfs::get_local_file(&local_path).await;
         while let Some(item) = stream.next().await {
-            let chunk = item.or(Err(format!("❌  Error while downloading file")))?;
+            let chunk = item
+                .or(Err(format!("❌  Error while downloading file")))
+                .unwrap();
             let new = min(downloaded + (chunk.len() as u64), dropbox_size as u64);
             downloaded = new;
             pb.set_position(downloaded);
-            file.write(&chunk)
-                .or(Err(format!("❌  Error while writing to file")))?;
+            file.write(&chunk).await.unwrap();
         }
+        assert_eq!(downloaded, dropbox_size as u64);
     }
     pb.finish();
     pb.set_prefix("✅  Download ");
-    Ok(())
 }
 
 #[cfg(test)]
@@ -230,8 +228,8 @@ mod tests {
         let http = crate::http::new_client();
         let dropbox_path = format!("{base_folder}/{}", &file_name);
         let local_path: &str = &format!("test/{}", file_name.to_string());
-        if crate::localfs::local_file_exists(&local_path.to_string()) {
-            crate::localfs::delete_local_file(&local_path);
+        if crate::localfs::local_file_exists(&local_path).await {
+            crate::localfs::delete_local_file(&local_path).await;
         }
         let res = crate::dropbox::get_file_metadata(&http, &dropbox_path).await;
         let json = crate::json::from_res(&res);
@@ -244,10 +242,9 @@ mod tests {
             &local_path,
             &&crate::progress::new_multi_progress(),
         )
-        .await
-        .unwrap();
-        let local_size = crate::localfs::get_local_size(&local_path);
+        .await;
+        let local_size = crate::localfs::get_local_size(&local_path).await;
         assert_eq!(local_size, dropbox_size);
-        crate::localfs::delete_local_file(&local_path);
+        crate::localfs::delete_local_file(&local_path).await;
     }
 }
