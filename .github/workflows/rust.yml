@@ -11,9 +11,8 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
+    name: Build & Test
     steps:
     - uses: actions/checkout@v3
     - name: Create env file
@@ -21,7 +20,7 @@ jobs:
         touch .env
         echo "${{ secrets.ENV_FILE }}" > .env    
     - name: Build
-      run: cargo build --verbose
+      run: cargo build --verbose -r
     - name: Authorize CI Runner to use the API
       run: cargo run -- --auth-only
     - name: Run unit tests
