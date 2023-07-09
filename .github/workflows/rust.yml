@@ -24,5 +24,7 @@ jobs:
       run: cargo build --verbose
     - name: Authorize CI Runner to use the API
       run: cargo run -- --auth-only
-    - name: Run tests
+    - name: Run unit tests
       run: cargo test --verbose
+    - name: Run end to end test
+      run: cargo run -- --e2e
