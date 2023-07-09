@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports)]
+
 mod auth;
 mod aws;
 mod cli;
@@ -82,8 +84,9 @@ async fn main() {
             println!("✅ Migration complete");
             ::std::process::exit(0)
         }
-        Err(_e) => {
+        Err(e) => {
             println!("🚨 Migration failed");
+            dbg!(e);
             ::std::process::exit(1)
         }
     }

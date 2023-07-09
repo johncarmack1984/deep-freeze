@@ -7,10 +7,11 @@ use sqlite::{self, ConnectionWithFullMutex};
 use crate::{json::JSON, util::setenv};
 
 pub type DBConnection = ConnectionWithFullMutex;
+pub type DBValue = sqlite::Value;
 pub type DBRow = sqlite::Row;
 
 pub fn connect(dbpath: &str) -> ConnectionWithFullMutex {
-    let sqlite = sqlite::Connection::open_with_full_mutex(dbpath).unwrap();
+    let sqlite: DBConnection = sqlite::Connection::open_with_full_mutex(dbpath).unwrap();
     init(&sqlite);
     sqlite
 }
@@ -103,7 +104,7 @@ pub fn init(connection: &ConnectionWithFullMutex) {
     }
 }
 
-pub fn insert_dropbox_paths(connection: &DBConnection, entries: &Vec<serde_json::Value>) {
+pub fn insert_dropbox_paths(connection: &DBConnection, entries: &Vec<JSON>) {
     let statement = build_insert_statement(&entries);
     match connection.execute(&statement) {
         Ok(_) => println!("🎉 File list updated"),
@@ -114,7 +115,7 @@ pub fn insert_dropbox_paths(connection: &DBConnection, entries: &Vec<serde_json:
     }
 }
 
-fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
+fn build_insert_statement(entries: &Vec<JSON>) -> String {
     let mut statement = entries
         .iter()
         .filter(|row| row.get(".tag").unwrap().as_str().unwrap() == "file")
@@ -148,7 +149,7 @@ fn build_insert_statement(entries: &Vec<serde_json::Value>) -> String {
         .to_owned()
 }
 
-pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
+pub fn insert_config(sqlite: &DBConnection) {
     let dropbox_base_folder = env::var("DROPBOX_BASE_FOLDER").unwrap_or(String::new());
     let s3_bucket = env::var("S3_BUCKET").unwrap_or(String::new());
     let aws_region = env::var("AWS_REGION").unwrap_or(String::new());
@@ -165,7 +166,7 @@ pub fn insert_config(sqlite: &ConnectionWithFullMutex) {
     }
 }
 
-pub fn insert_user(connection: &ConnectionWithFullMutex, member: &JSON) {
+pub fn insert_user(connection: &DBConnection, member: &JSON) {
     let dropbox_user_id = member.get("account_id").unwrap().as_str().unwrap();
     let dropbox_team_member_id = member.get("team_member_id").unwrap().as_str().unwrap();
     setenv("DROPBOX_TEAM_MEMBER_ID", dropbox_team_member_id.to_string());
@@ -238,7 +239,7 @@ pub fn count_migrated(connection: &ConnectionWithFullMutex) -> i64 {
         .unwrap()
 }
 
-pub fn _count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
+pub fn count_unmigrated(connection: &ConnectionWithFullMutex) -> i64 {
     connection
         .prepare("SELECT COUNT(*) FROM paths WHERE migrated < 1")
         .unwrap()
@@ -328,4 +329,15 @@ pub fn get_dropbox_size(connection: &ConnectionWithFullMutex, dropbox_id: &str) 
         .map(|row| row.read::<i64, _>(0))
         .next()
         .unwrap()
+}
+
+pub fn get_rows_to_migrate(connection: &ConnectionWithFullMutex) -> Vec<DBRow> {
+    let mut rows = Vec::new();
+    for row in connection
+        .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
+        .unwrap()
+    {
+        rows.push(row.unwrap());
+    }
+    rows
 }

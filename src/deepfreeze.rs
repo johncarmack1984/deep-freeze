@@ -3,6 +3,7 @@ use crate::aws;
 use crate::db;
 use crate::db::DBConnection;
 use crate::db::DBRow;
+use crate::db::DBValue;
 use crate::dropbox;
 use crate::localfs;
 use crate::progress;
@@ -10,54 +11,108 @@ use crate::util;
 use crate::util::getenv;
 use aws_sdk_s3::{Client as AWSClient, Error as AWSError};
 use indicatif::HumanDuration;
+use sqlite::ConnectionWithFullMutex;
+use sqlite::Value;
+use std::borrow::Borrow;
 use std::env;
 use std::time::Instant;
 
 pub async fn perform_migration(
     http: reqwest::Client,
-    sqlite: sqlite::ConnectionWithFullMutex,
+    sqlite: DBConnection,
     aws: AWSClient,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     print!("\n🧊  Performing migration...\n\n\n\n");
     let started = Instant::now();
+
+    let total_count: u64 = db::count_rows(&sqlite).try_into().unwrap();
+    let unmigrated_count: u64 = db::count_unmigrated(&sqlite).try_into().unwrap();
     let m = progress::new_multi_progress();
+
+    let migration_progress = m.add(progress::new(
+        total_count - unmigrated_count,
+        "migration_progress",
+    ));
+
     for row in sqlite
         .prepare("SELECT * FROM paths WHERE migrated < 1 AND skip < 1 ORDER BY dropbox_path ASC")
         .unwrap()
         .into_iter()
-        .map(|row| row.unwrap())
+        .map(|row| async move {
+            // let row = row.borrow().clone().to_owned();
+            // dbg!(&row);
+            // let _dropbox_id = row.read::<&str, _>("dropbox_id");
+            // let _dropbox_path = row.read::<String, _>("dropbox_path").unwrap();
+            // let _dropbox_size = row.read::<String, _>("dropbox_size").unwrap();
+            // let _dropbox_hash = row.read::<String, _>("dropbox_hash").unwrap();
+            // let _migrated = row.read::<String, _>("migrated").unwrap();
+            tokio::task::spawn(async move {
+                // print!("{:?}\n\n\n", row);
+                // migrate_file_to_s3(row, &http, &aws, &sqlite, &m);
+                //         // dbg!(&aws);
+                //         // dbg!(http);
+                //         // db::get_dropbox_size(&sqlite, &dropbox_id);
+                //         println!("📂  Migrating {_dropbox_path}");
+            });
+        })
     {
-        let dropbox_id = row
-            .try_read::<&str, &str>("dropbox_id")
-            .unwrap()
-            .to_string();
-        let filter = |&i| i == dropbox_id;
-        if env::var("SKIP")
-            .unwrap_or("".to_string())
-            .split(',')
-            .collect::<Vec<&str>>()
-            .iter()
-            .any(filter)
-        {
-            println!("✅ Skipping {dropbox_id}");
-            continue;
-        } else {
-            if getenv("CHECK_ONLY") != "true" {
-                auth::refresh_token(&http).await;
-            }
-            migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
-                .await
-                .unwrap();
-        }
+        row.await;
     }
-    db::report_status(&sqlite);
+
+    // for row in rows {
+    //     dbg!(&row);
+    // }
+    // let sqlite: &'static DBConnection = &sqlite;
+    // // while let Ok(sqlite::State::Row) = statement.next() {
+    //     // for row in db::get_rows
+    //     // for row in rows.
+    // {
+    //     // let row = statement.read::<_, _>("row").unwrap();
+    //     // dbg!(&statement);
+    //     // dbg!(&http);
+    //     // dbg!(&aws);
+    //     // let http = http.clone();
+    //     // let aws = aws.clone();
+
+    //     migration_progress.inc(1);
+    //     migrate_file_to_s3(statement, &http, &aws, &sqlite, &m).await?;
+    //     // let row = statement.read::<DBRow>().unwrap();
+    // }
+
+    // .collect();
+
+    // dbg!(statement);
+
+    // for row in rows {
+    //     migrate_file_to_s3(row.unwrap(), &http, &aws, &sqlite, &m).await?;
+    // }
+    // print!("{:?}", rows);
+
+    // while let Some(row) = rows.next() {
+    // dbg!(row);
+    // migrate_file_to_s3(row, &http, &aws, &sqlite, &m).await?;
+    // }
+
+    // for row in rows {
+    //     migrate_file_to_s3(row, &http, &aws, &sqlite, &m).await?;
+    // }
+
+    // {
+    //     if getenv("CHECK_ONLY") == "false" {
+    //         auth::refresh_token(&http).await;
+    //     }
+    //     migrate_file_to_s3(row, &http, &aws, &sqlite, &m)
+    //         .await
+    //         .unwrap();
+    // }
+    // db::report_status(&sqlite);
 
     println!("✨ Done in {}", HumanDuration(started.elapsed()));
-    if getenv("CHECK_ONLY") == "true" {
-        println!("✅  Exiting");
-        std::process::exit(0);
-    }
-    println!("");
+    // if getenv("CHECK_ONLY") == "true" {
+    //     println!("✅  Exiting");
+    //     std::process::exit(0);
+    // }
+    print!("\n\n\n");
     Ok(())
 }
 
