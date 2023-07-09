@@ -1,35 +1,31 @@
-use crate::db::DBConnection;
-use crate::util::setenv;
-use crate::{db, localfs, progress};
-use aws_config::meta::region::RegionProviderChain;
-use aws_config::SdkConfig;
-use aws_sdk_s3::config::Region;
-use aws_sdk_s3::operation::complete_multipart_upload::{
-    CompleteMultipartUploadError, CompleteMultipartUploadOutput,
-};
-use aws_sdk_s3::operation::create_multipart_upload::{
-    CreateMultipartUploadError, CreateMultipartUploadOutput,
-};
-use aws_sdk_s3::operation::delete_object::{DeleteObjectError, DeleteObjectOutput};
-// use aws_sdk_s3::operation::get_bucket_accelerate_configuration::{
-//     GetBucketAccelerateConfigurationError, GetBucketAccelerateConfigurationOutput,
-// };
-// use aws_sdk_s3::operation::get_bucket_location::{GetBucketLocationError, GetBucketLocationOutput};
-use aws_sdk_s3::operation::get_object_attributes::GetObjectAttributesOutput;
-use aws_sdk_s3::operation::list_buckets::{ListBucketsError, ListBucketsOutput};
-use aws_sdk_s3::operation::put_object::{PutObjectError, PutObjectOutput};
-use aws_sdk_s3::operation::upload_part::{UploadPartError, UploadPartOutput};
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass};
-use aws_sdk_s3::{Client, Error};
-use aws_sdk_secretsmanager::Client as SecretsClient;
-use aws_smithy_http::byte_stream::{ByteStream, Length};
-use aws_smithy_http::result::SdkError;
+use crate::{db, localfs, progress, util};
+use db::DBConnection;
 use deep_freeze::{
     TrackableBodyStream, MAX_CHUNKS, MAX_CHUNK_SIZE, MAX_UPLOAD_SIZE, MIN_CHUNK_SIZE,
 };
+use util::setenv;
+
+use aws_config::{meta::region::RegionProviderChain, SdkConfig};
+use aws_sdk_s3::{
+    config::Region,
+    error::SdkError,
+    operation::{
+        complete_multipart_upload::{CompleteMultipartUploadError, CompleteMultipartUploadOutput},
+        create_multipart_upload::{CreateMultipartUploadError, CreateMultipartUploadOutput},
+        delete_object::{DeleteObjectError, DeleteObjectOutput},
+        get_object_attributes::GetObjectAttributesOutput,
+        list_buckets::{ListBucketsError, ListBucketsOutput},
+        put_object::{PutObjectError, PutObjectOutput},
+        upload_part::{UploadPartError, UploadPartOutput},
+    },
+    types::{CompletedMultipartUpload, CompletedPart, ObjectAttributes, StorageClass},
+    Client, Error,
+};
+
+use aws_sdk_secretsmanager::Client as SecretsClient;
+use aws_smithy_http::byte_stream::{ByteStream, Length};
 use indicatif::HumanBytes;
-use std::path::{Path, PathBuf};
-use std::result::Result;
+use std::path::PathBuf;
 
 pub type AWSClient = Client;
 
@@ -37,7 +33,6 @@ pub async fn new_config() -> SdkConfig {
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
         .or_else(Region::new("us-east-1"));
-    // let endpoint_url_provider
     aws_config::from_env().region(region_provider).load().await
 }
 
@@ -96,7 +91,7 @@ pub async fn choose_bucket(client: &Client, sqlite: &DBConnection) {
     {
         Ok(choice) => {
             println!("🗄️  You chose {choice}");
-            setenv("AWS_S3_BUCKET", choice.to_string());
+            setenv("AWS_S3_BUCKET", choice.to_string()).await;
             // let aws_region = get_bucket_region(&client, &choice).await.unwrap();
             // dbg!(&aws_region);
             // let aws_region = get_bucket_region(&aws, "font.vegify.app")
@@ -247,11 +242,7 @@ pub async fn multipart_upload(
     let upload_id = res.upload_id().unwrap();
     let mut upload_parts: Vec<CompletedPart> = Vec::new();
 
-    let path = Path::new(local_path);
-    let file_size = tokio::fs::metadata(path)
-        .await
-        .expect("file not found")
-        .len();
+    let file_size = localfs::get_local_size(&local_path).await as u64;
     let (chunk_size, chunk_count, size_of_last_chunk) = chunk_math(file_size);
 
     let pb = m.add(progress::new(file_size, "file_transfer"));
@@ -304,7 +295,7 @@ async fn handle_multipart_chunks_upload(
         let uploaded = chunk_index * chunk_size;
         pb.set_prefix(format!("⬆️   Upload: Chunk {chunk_index}/{chunk_count} | ",));
         let stream = ByteStream::read_from()
-            .path(Path::new(local_path))
+            .path(local_path)
             .offset(uploaded)
             .length(Length::Exact(this_chunk))
             .build()
@@ -380,7 +371,7 @@ pub async fn upload_to_s3(
     bucket: &str,
     m: &crate::progress::MultiProgress,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    match localfs::get_local_size(&local_path) {
+    match localfs::get_local_size(&local_path).await {
         // 0 => panic!("file has no size"),
         size if size >= MAX_UPLOAD_SIZE as i64 => panic!("file is too big"),
         size if size < MAX_CHUNK_SIZE as i64 => {
@@ -543,7 +534,7 @@ mod tests {
         let aws = crate::aws::new_client().await;
         let key = String::from("test-s3-get-attrs.txt");
         let local_path = String::from(format!("./test/{key}"));
-        let local_size = crate::localfs::get_local_size(&local_path);
+        let local_size = crate::localfs::get_local_size(&local_path).await;
         crate::aws::upload_to_s3(
             &aws,
             &key,
