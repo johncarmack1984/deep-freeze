@@ -15,6 +15,7 @@ use clap::Parser;
 use db::DBConnection;
 use http::HTTPClient;
 use std::{env, process};
+use tokio::signal;
 use util::{getenv, setenv};
 
 #[derive(Parser, Debug)]
@@ -77,14 +78,16 @@ async fn main() {
 
     auth::check_account(&http, &database).await;
     dropbox::get_paths(&http, &database).await;
-    match deepfreeze::perform_migration(http, database, aws).await {
+    deepfreeze::perform_migration(http, database, aws).await;
+
+    match signal::ctrl_c().await {
         Ok(_) => {
-            println!("✅ Migration complete");
-            ::std::process::exit(0)
+            println!("✅  Exiting");
+            process::exit(0)
         }
-        Err(_e) => {
-            println!("🚨 Migration failed");
-            ::std::process::exit(1)
+        Err(err) => {
+            eprintln!("🚨  Exiting with error {}", err);
+            process::exit(1)
         }
     }
 }

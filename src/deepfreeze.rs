@@ -13,11 +13,12 @@ use indicatif::HumanDuration;
 use std::env;
 use std::time::Instant;
 
+#[async_recursion::async_recursion(?Send)]
 pub async fn perform_migration(
     http: reqwest::Client,
     sqlite: sqlite::ConnectionWithFullMutex,
     aws: AWSClient,
-) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+) {
     print!("\n🧊  Performing migration...\n\n\n\n");
     let started = Instant::now();
     let m = progress::new_multi_progress();
@@ -57,8 +58,16 @@ pub async fn perform_migration(
         println!("✅  Exiting");
         std::process::exit(0);
     }
-    println!("");
-    Ok(())
+    match db::_count_unmigrated(&sqlite) {
+        0 => {
+            println!("✅  All files migrated");
+            ::std::process::exit(0)
+        }
+        _ => {
+            println!("🚨  Some files not migrated");
+            perform_migration(http, sqlite, aws).await;
+        }
+    }
 }
 
 async fn migrate_file_to_s3(
