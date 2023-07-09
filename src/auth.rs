@@ -2,7 +2,7 @@ use crate::db::{self, DBConnection};
 use crate::dropbox;
 use crate::http::{self, HTTPClient, HeaderMap};
 use crate::json;
-use crate::util::{prompt, setenv};
+use crate::util::{getenv, prompt, setenv};
 
 use inquire::{InquireError, Select};
 use open;
@@ -41,11 +41,11 @@ async fn handle_successful_login(res: String) {
     let team_id = json.get("team_id").unwrap().as_str().unwrap();
     let refresh_token = json.get("refresh_token").unwrap().as_str().unwrap();
     let access_token = json.get("access_token").unwrap().as_str().unwrap();
-    setenv("DROPBOX_TEAM_ID", team_id.to_string());
+    setenv("DROPBOX_TEAM_ID", team_id.to_string()).await;
     println!("🔑 Team ID set");
-    setenv("DROPBOX_REFRESH_TOKEN", refresh_token.to_string());
+    setenv("DROPBOX_REFRESH_TOKEN", refresh_token.to_string()).await;
     println!("🔑 Refresh token set");
-    setenv("DROPBOX_ACCESS_TOKEN", access_token.to_string());
+    setenv("DROPBOX_ACCESS_TOKEN", access_token.to_string()).await;
     println!("🔑 Login: Access token set");
 }
 
@@ -56,8 +56,8 @@ async fn get_authorization_code() {
     println!("🌐 Open this URL in your browser (one might have opened already):");
     print!("\n🌐 {}\n\n", url);
     println!("🔐 and authorize the app.");
-    let authorization_code = prompt("🪪  Paste the authorization code you see here");
-    setenv("DROPBOX_AUTHORIZATION_CODE", authorization_code);
+    let authorization_code = prompt("🪪  Paste the authorization code you see here").await;
+    setenv("DROPBOX_AUTHORIZATION_CODE", authorization_code).await;
     println!("🔑 Authorization code set");
 }
 
@@ -84,7 +84,7 @@ pub async fn refresh_token(http: &HTTPClient) -> String {
             false => {
                 let json = json::from_res(&res);
                 let access_token = json.get("access_token").unwrap().as_str().unwrap();
-                setenv("DROPBOX_ACCESS_TOKEN", access_token.to_string());
+                setenv("DROPBOX_ACCESS_TOKEN", access_token.to_string()).await;
                 get_current_account(&http).await
             }
         },
@@ -140,7 +140,6 @@ async fn handle_auth_error(http: &HTTPClient, res: String) -> String {
 
 async fn select_team_member(http: &HTTPClient, sqlite: &DBConnection) {
     let res = dropbox::get_team_members_list(&http).await;
-    // println!("println res {:?}", res);
     let json = json::from_res(&res);
     let members = json.get("members").unwrap().as_array().unwrap();
     let options: Vec<String> = members
@@ -175,7 +174,7 @@ async fn select_team_member(http: &HTTPClient, sqlite: &DBConnection) {
                 .unwrap()
                 .get("profile")
                 .unwrap();
-            db::insert_user(sqlite, member);
+            db::insert_user(sqlite, member).await;
         }
         Err(_) => {
             println!("🚫  Error selecting team member");
@@ -185,18 +184,21 @@ async fn select_team_member(http: &HTTPClient, sqlite: &DBConnection) {
 }
 
 pub async fn check_account(http: &HTTPClient, sqlite: &DBConnection) {
-    if dotenv::var("DROPBOX_REFRESH_TOKEN").is_err() {
+    if getenv("DROPBOX_REFRESH_TOKEN").is_err() {
         login(http).await;
     }
-    if dotenv::var("DROPBOX_TEAM_MEMBER_ID").is_err() {
+    if getenv("DROPBOX_TEAM_MEMBER_ID").is_err() {
         select_team_member(http, sqlite).await;
     }
     print!("\n🪪  Checking account...\n");
     let res = get_current_account(&http).await;
     let json = json::from_res(&res);
-    db::insert_user(sqlite, &json);
+    db::insert_user(sqlite, &json).await;
     print!(
         "👤  Logged in as {}\n\n",
         &json.get("email").unwrap().as_str().unwrap()
     );
+    if getenv("DROPBOX_BASE_FOLDER").is_err() {
+        dropbox::choose_folder(http, sqlite).await;
+    }
 }
