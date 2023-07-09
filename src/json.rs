@@ -1,9 +1,7 @@
-use serde_json::Value;
-
 pub type JSON = serde_json::Value;
 
-pub fn from_res(res: &String) -> Value {
-    match serde_json::from_str::<Value>(res) {
+pub fn from_res(res: &String) -> JSON {
+    match serde_json::from_str::<JSON>(res) {
         Ok(json) => json,
         Err(e) => {
             dbg!(&e);
@@ -12,19 +10,19 @@ pub fn from_res(res: &String) -> Value {
     }
 }
 
-pub fn get_entries(json: &Value) -> &Vec<serde_json::Value> {
+pub fn get_entries(json: &JSON) -> &Vec<JSON> {
     json.get("entries").unwrap().as_array().unwrap()
 }
 
-pub fn get_has_more(json: &Value) -> bool {
+pub fn get_has_more(json: &JSON) -> bool {
     json.get("has_more").unwrap().as_bool().unwrap()
 }
 
-pub fn get_cursor(json: &Value) -> String {
+pub fn get_cursor(json: &JSON) -> String {
     json.get("cursor").unwrap().to_string().to_owned()
 }
 
-pub fn get_size(json: &Value) -> i64 {
+pub fn get_size(json: &JSON) -> i64 {
     match json.get("size").unwrap().as_i64() {
         Some(size) => size,
         None => {
@@ -35,11 +33,7 @@ pub fn get_size(json: &Value) -> i64 {
     }
 }
 
-pub fn _get_id(json: &Value) -> String {
-    json.get("id").unwrap().as_str().unwrap().to_string()
-}
-
-pub fn count_files(json: &Value) -> usize {
+pub fn count_files(json: &JSON) -> usize {
     json.get("entries")
         .unwrap()
         .as_array()
@@ -47,4 +41,8 @@ pub fn count_files(json: &Value) -> usize {
         .iter()
         .filter(|row| row.get(".tag").unwrap().as_str().unwrap() == "file")
         .count()
+}
+
+pub fn _get_id(json: &JSON) -> String {
+    json.get("id").unwrap().as_str().unwrap().to_string()
 }
