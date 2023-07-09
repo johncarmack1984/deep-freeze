@@ -1,53 +1,42 @@
 use sedregex::find_and_replace;
-use std::io::{self, Read, Write};
-use std::{env, fs, fs::File, path::Path};
+use std::{env, io::stdin};
+use tokio::io::{self, AsyncWriteExt};
 
-use crate::localfs::get_local_file;
+use crate::localfs;
 
-pub fn setenv(key: &str, value: String) {
+pub async fn setenv(key: &str, value: String) {
     env::set_var(key, value.clone());
-    update_env_file(key, value);
+    localfs::update_env_file(key, value).await.unwrap();
 }
 
-pub fn getenv(key: &str) -> String {
-    env::var(key).unwrap()
+pub fn getenv(key: &str) -> Result<String, env::VarError> {
+    env::var(key)
 }
 
-pub fn update_env_file(key: &str, value: String) {
-    let env_filename = env::var("ENV_FILE").unwrap();
-    let env_path = Path::new(&env_filename);
-    let env_temp_filename = format!("{env_filename}.temp", env_filename = &env_filename);
-    let env_temp_path = Path::new(&env_temp_filename);
-    let mut src = get_local_file(env_path.to_str().unwrap());
-    let mut data = String::new();
-    src.read_to_string(&mut data).unwrap();
-    let mut newenv: String;
-    match data.contains(key) {
-        true => {
-            newenv = data
-                .lines()
-                .map(|line| match line.starts_with(format!("{key}=").as_str()) {
-                    true => format!("{}=\"{}\"", key, value),
-                    false => line.to_string(),
-                })
-                .collect::<Vec<String>>()
-                .join("\n");
-        }
-        false => {
-            data.push_str(format!("{}=\"{}\"", key, value).as_str());
-            newenv = data;
-        }
-    }
-    newenv.push_str("\n");
-    let mut dst = File::create(env_temp_path).unwrap();
-    dst.write_all(newenv.as_bytes()).unwrap();
-    fs::rename(env_temp_path, env_path).unwrap();
-    dotenv::from_filename(env_filename).ok();
-    assert_eq!(env::var(key).unwrap(), value);
+pub async fn setenv_for_e2e() {
+    println!("🧪 Running end-to-end test");
+    setenv("ENV_FILE", ".env.test".to_string()).await;
+    setenv("E2E", "true".to_string()).await;
+    setenv("DBFILE", "test/db.sqlite".to_string()).await;
+    setenv("TEMP_DIR", "test".to_string()).await;
+    setenv("SILENT", "false".to_string()).await;
+    setenv("RESET", "true".to_string()).await;
+    setenv("DROPBOX_BASE_FOLDER", "/deep-freeze-test".to_string()).await;
+    setenv("AWS_S3_BUCKET", "deep-freeze-test".to_string()).await;
+    setenv("RUST_BACKTRACE", "1".to_string()).await;
+}
+
+pub async fn prompt(msg: &str) -> String {
+    io::stderr().flush().await.unwrap();
+    eprint!("{}: ", msg);
+    let mut input = String::new();
+    stdin().read_line(&mut input).unwrap();
+    eprint!("\n\n");
+    input.trim().to_owned()
 }
 
 pub fn standardize_path(old_path: &str) -> String {
-    let base_folder = env::var("DROPBOX_BASE_FOLDER").unwrap();
+    let base_folder = getenv("DROPBOX_BASE_FOLDER").unwrap();
     let mut path = find_and_replace(
         &old_path.clone().to_owned(),
         &[format!("s/\\{}\\///g", base_folder)],
@@ -63,14 +52,6 @@ pub fn standardize_path(old_path: &str) -> String {
     .to_string();
 
     path.to_string()
-}
-
-pub fn prompt(msg: &str) -> String {
-    eprint!("{}: ", msg);
-    io::stderr().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input.trim().to_owned()
 }
 
 pub fn coerce_static_str(s: String) -> &'static str {
