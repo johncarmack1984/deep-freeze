@@ -79,7 +79,7 @@ async fn migrate_file_to_s3(
         .to_string();
 
     match check_migration_status(&aws, &sqlite, &row).await {
-        0 => match getenv("CHECK_ONLY").unwrap().as_str() {
+        -1..=0 => match getenv("CHECK_ONLY").unwrap().as_str() {
             "true" => {
                 print!("\n\n");
                 return ();
@@ -88,7 +88,7 @@ async fn migrate_file_to_s3(
         },
         1 => return (),
         err => {
-            dbg!("err");
+            dbg!(err);
             println!("❌  Unknown migration status {err}");
             db::set_skip(&sqlite, &dropbox_id);
         }
@@ -157,7 +157,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
                 db::set_unmigrated(&sqlite, &dropbox_id);
                 0
             }
-            _ => {
+            err => {
                 println!("❌  {}", err);
                 db::set_skip(&sqlite, &dropbox_id);
                 0
