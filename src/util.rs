@@ -37,22 +37,12 @@ pub async fn prompt(msg: &str) -> String {
 
 pub fn standardize_path(old_path: &str) -> String {
     let base_folder = getenv("DROPBOX_BASE_FOLDER").unwrap();
-    let mut path = find_and_replace(
+    find_and_replace(
         &old_path.clone().to_owned(),
         &[format!("s/\\{}\\///g", base_folder)],
     )
     .unwrap()
-    .to_string();
-
-    path = find_and_replace(
-        &path,
-        &["s/channel/Channel/g", "s/_/_/g", "s/\\|/\\|/g", "s/•/\\•/g"],
-        // "s/\\|/\\|/g", "s/•/\\•/g"
-    )
-    .unwrap()
-    .to_string();
-
-    path.to_string()
+    .to_string()
 }
 
 pub fn coerce_static_str(s: String) -> &'static str {
