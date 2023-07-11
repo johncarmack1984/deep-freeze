@@ -47,6 +47,7 @@ pub fn standardize_path(old_path: &str) -> String {
     path = find_and_replace(
         &path,
         &["s/channel/Channel/g", "s/_/_/g", "s/\\|/\\|/g", "s/•/\\•/g"],
+        // "s/\\|/\\|/g", "s/•/\\•/g"
     )
     .unwrap()
     .to_string();
