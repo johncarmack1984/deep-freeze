@@ -1,0 +1,19 @@
+name: "Terraform Apply"
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    
+env:
+  TF_VARS: ${{ secrets.TF_VARS }}
+  CONFIG_DIRECTORY: "./"
+
+jobs:
+  terraform:
+    name: "Terraform Apply"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3

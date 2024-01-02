@@ -1,10 +1,11 @@
-name: Rust
+name: Build Package
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  workflow_call:
+    inputs:
+      ENV_FILE:
+        description: 'Environment file'
+        required: true
 
 env:
   CARGO_TERM_COLOR: always

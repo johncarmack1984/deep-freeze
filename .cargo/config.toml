@@ -1,0 +1,2 @@
+[registries]
+kellnr = { index = "sparse+https://crates.newearth.llc/api/v1/crates/", token = "yourauthtoken" }
