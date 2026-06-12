@@ -38,7 +38,7 @@ pub async fn prompt(msg: &str) -> String {
 pub fn standardize_path(old_path: &str) -> String {
     let base_folder = getenv("DROPBOX_BASE_FOLDER").unwrap();
     find_and_replace(
-        &old_path.clone().to_owned(),
+        &old_path.to_owned(),
         &[format!("s/\\{}\\///g", base_folder)],
     )
     .unwrap()

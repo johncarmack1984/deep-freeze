@@ -40,7 +40,7 @@ pub async fn perform_migration(
             println!("✅ Skipping {dropbox_id}\n\n");
             continue;
         } else {
-            if getenv("CHECK_ONLY").unwrap() != "true" {
+            if getenv("CHECK_ONLY").unwrap_or_default() != "true" {
                 auth::refresh_token(&http).await;
             }
             println!("📂  Migrating {dropbox_id}");
