@@ -7,10 +7,18 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+
+# Self-contained build (was: reusable-workflow calls into rust.yml + terraform-plan.yml,
+# which startup-failed on the Node-16 checkout runner; the auth/e2e/plan steps also
+# need live Dropbox/AWS credentials and the deferred TF adoption). The reusable
+# workflows are kept in this directory for when those are wired back up.
 jobs:
-    build:
-        uses: ./.github/workflows/rust.yml
-        secrets: inherit
-    plan:
-        uses: ./.github/workflows/terraform-plan.yml
-        secrets: inherit
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --verbose
