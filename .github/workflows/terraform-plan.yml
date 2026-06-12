@@ -2,18 +2,7 @@ name: "Terraform Plan"
 
 on:
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      TF_VARS:
-        type: string
-        description: "Terraform variables"
-        required: true
-        default: ${{ secrets.TF_VARS }}
-      CONFIG_DIRECTORY:
-        type: string
-        description: "Terraform configuration directory"
-        required: true
-        default: "./"
+  workflow_call: {}
 
 env:
   TF_VARS: ${{ secrets.TF_VARS }}

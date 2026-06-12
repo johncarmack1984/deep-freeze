@@ -1,11 +1,7 @@
 name: Build Package
 
 on:
-  workflow_call:
-    inputs:
-      ENV_FILE:
-        description: 'Environment file'
-        required: true
+  workflow_call: {}
 
 env:
   CARGO_TERM_COLOR: always
