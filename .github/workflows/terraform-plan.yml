@@ -2,7 +2,7 @@ name: "Terraform Plan"
 
 on:
   workflow_dispatch:
-  workflow_call: {}
+  workflow_call:
 
 env:
   TF_VARS: ${{ secrets.TF_VARS }}

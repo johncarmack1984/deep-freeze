@@ -1,7 +1,7 @@
 name: Build Package
 
 on:
-  workflow_call: {}
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
