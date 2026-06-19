@@ -1,86 +1,64 @@
 # Deep Freeze
 
-Deep Freeze is a command-line tool for migrating files to Amazon S3 Deep Archive. It allows you to easily transfer files from various sources, such as Dropbox, to an S3 Deep Archive storage bucket.
+Resumable Rust CLI that bulk-migrates a Dropbox tree into AWS S3 Glacier Deep Archive.
 
-## Prerequisites
+[![Build](https://github.com/johncarmack1984/deep-freeze/actions/workflows/main.yml/badge.svg)](https://github.com/johncarmack1984/deep-freeze/actions/workflows/main.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Before using Deep Freeze, make sure you have the following prerequisites installed:
+Deep Freeze streams every file in a Dropbox folder — including Dropbox Business team accounts — into S3 with the `DEEP_ARCHIVE` storage class, recording every object in a local SQLite database so the transfer is fully resumable. It was built to retire a Dropbox Business subscription by moving its entire contents into cold storage at a fraction of the price.
 
-- Rust programming language
-- Cargo package manager
+## What it has done
 
-## Installation
+Deep Freeze drove a real **15.6 TiB migration** — 7,253 files from a Dropbox Business account into S3 Glacier Deep Archive — and confirmed 7,241 of them present in S3 at exact byte size, with the remainder resolved by hand (case-only path renames and a couple of re-uploads). The hard part was the long tail: ten media files between 82 GiB and 1.24 TiB, 5.26 TiB combined. Those were moved by a transient `c6in.xlarge` relay that streamed Dropbox → S3 and self-terminated, so nothing multi-terabyte had to round-trip through a laptop. End state: the source account was fully represented in cold storage and safe to cancel.
 
-To install Deep Freeze, follow these steps:
+## How it works
 
-1. Clone the repository:
+1. Authenticates to Dropbox over OAuth2 with an offline refresh token; on a Business/Team account it lists members and operates as a selected user via the `Dropbox-API-Select-User` header.
+2. Recursively lists the chosen base folder and records every file — id, path, size, and Dropbox `content_hash` — in a local SQLite database.
+3. For each unfinished file, streams Dropbox → local temp → S3 with a live progress bar, choosing a single `PutObject` or a multipart upload automatically by size (5 GiB threshold), always with `StorageClass::DeepArchive`.
+4. Confirms the uploaded object's size matches Dropbox, marks the row migrated, and deletes the temp copy. The run recurses until no unmigrated files remain, so it is idempotent — kill it and rerun and it resumes exactly where it stopped.
 
-   ```bash
-   git clone https://github.com/example/deep-freeze.git
-   ```
+## Integrity
 
-2. Navigate to the project directory:
+Verification today is **size-based**: a file counts as migrated when its S3 object size equals the size Dropbox reported, and the streamed download asserts it received exactly that many bytes, so truncated transfers fail loudly. Dropbox's `content_hash` is recorded for every file, but end-to-end **hash verification is not yet implemented** — it's a known TODO, and the schema already reserves a column for the S3-side hash. Read the guarantee as "same size, same storage class," not "bit-for-bit checksummed."
 
-   ```bash
-   cd deep-freeze
-   ```
+## Install
 
-3. Build the project using Cargo:
-
-   ```bash
-   cargo build --release
-   ```
-
-4. The executable binary will be generated in the `target/release` directory.
+```bash
+cargo build --release
+# binary at target/release/deep-freeze
+```
 
 ## Usage
 
-To use Deep Freeze, follow the steps below:
+Configuration is environment-driven and self-persisting: any value you pass or enter is written back to the `.env` file, and anything missing is prompted for interactively — Dropbox OAuth opens in your browser, and team member, base folder, and bucket are picked from a list. Copy `.env.example` to `.env` to start.
 
-1. Create a `.env` file in the project directory. This file should contain the necessary environment variables. Refer to the [Environment Variables](#environment-variables) section for a list of required variables.
+```bash
+# First run — interactive: OAuth, then pick team member / base folder / bucket
+./target/release/deep-freeze
 
-2. Run the Deep Freeze command with the desired options. Here's an example:
+# Resume a migration against an explicit DB and bucket
+./target/release/deep-freeze --dbfile db.sqlite --s3-bucket my-archive-bucket
 
-   ```bash
-   ./deep-freeze --access-token <dropbox-access-token> --aws-access-key-id <aws-access-key-id> --aws-secret-access-key <aws-secret-access-key> --aws-region <aws-region> --dbfile <path-to-db-file> --env-file <path-to-env-file> --e2e
-   ```
+# Report progress and exit
+./target/release/deep-freeze --status-only
 
-   Replace `<dropbox-access-token>`, `<aws-access-key-id>`, `<aws-secret-access-key>`, `<aws-region>`, `<path-to-db-file>`, and `<path-to-env-file>` with the appropriate values.
+# Re-verify already-migrated files against S3 (size) and exit
+./target/release/deep-freeze --check-only
 
-3. Deep Freeze will perform the migration process and provide the status of the migration. If the migration is successful, the program will exit with a status code of 0. If an error occurs during migration, the program will exit with a non-zero status code.
+# Refresh the Dropbox token only (for CI)
+./target/release/deep-freeze --auth-only
+```
 
-## Environment Variables
+Useful flags: `--dbfile` (SQLite path, default `db.sqlite`), `--s3-bucket`, `--aws-region` (default `us-east-1`), `--temp-dir` (default `temp`), `--skip "id1,id2"` (repeatable), `--reset` / `--reset-only` (clear DB + temp files), `--silent`. Run with `--help` for the full list.
 
-Deep Freeze uses the following environment variables:
+## Configuration
 
-- `DROPBOX_ACCESS_TOKEN`: Dropbox access token.
-- `AWS_ACCESS_KEY_ID`: AWS access key ID.
-- `AWS_SECRET_ACCESS_KEY`: AWS secret access key.
-- `AWS_REGION`: AWS region.
-- `DBFILE`: Path to the SQLite database file.
-- `ENV_FILE`: Path to the `.env` file.
-- `E2E`: Set to "true" to run the program with test values.
-- `RESET`: Set to "true" to reset the database and temp files.
-- `RESET_ONLY`: Set to "true" to reset the database and temp files, then exit.
-- `S3_BUCKET`: The S3 bucket to use.
-- `SILENT`: Set to "true" to run the program in silent mode.
-- `SKIP`: Comma-separated paths to skip during migration.
-- `TEMP_DIR`: Path to the temporary directory.
+Required environment (see `.env.example`): `DROPBOX_REFRESH_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_BUCKET`, `DROPBOX_BASE_FOLDER`. The Dropbox app secret is read from AWS Secrets Manager (`DropboxAppSecret`), not the environment.
 
-Note: If an environment variable is not set, Deep Freeze will prompt for the value during runtime.
+## Built with
 
-## Contributing
-
-Contributions to Deep Freeze are welcome! If you find any issues or have suggestions for improvement, please open an issue or submit a pull request on the GitHub repository.
+Async Rust on Tokio: the AWS SDK (`aws-sdk-s3`, `aws-sdk-secretsmanager`) with a custom progress-reporting `ByteStream`, `reqwest` for the Dropbox API, the `sqlite` crate for resumable state, and `clap` / `inquire` / `indicatif` for the CLI.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
-
-## Acknowledgments
-
-Deep Freeze makes use of the following libraries and dependencies:
-
-- [dotenv](https://crates.io/crates/dotenv) - For loading environment variables from a `.env` file.
-- [clap](https://crates.io/crates/clap) - For command-line argument parsing.
-- [tokio](https://crates.io/crates/tokio) - Asynchronous runtime for Rust.
+[MIT](LICENSE).
