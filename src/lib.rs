@@ -1,5 +1,5 @@
 use aws_sdk_s3::primitives::ByteStream;
-use aws_smithy_http::body::SdkBody;
+use aws_smithy_types::body::SdkBody;
 use futures::{Future, Stream};
 use hyper::body::Bytes;
 use std::{path::PathBuf, task::Poll};
@@ -95,7 +95,7 @@ impl<I: AsyncReadExt + Unpin + Send + Sync + 'static> TrackableBodyStream<I> {
     /// Consumes this body stream and returns a `BodyStream` object that can be passed to the `body`
     /// method of the `put_object` call in the AWS SDK for Rust.
     pub fn to_s3_stream(self) -> ByteStream {
-        let sdk_body = SdkBody::from(hyper::Body::from(Box::new(self)
+        let sdk_body = SdkBody::from_body_0_4(hyper::Body::from(Box::new(self)
             as Box<
                 dyn Stream<
                         Item = Result<

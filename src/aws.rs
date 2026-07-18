@@ -5,7 +5,7 @@ use deep_freeze::{
 };
 use util::setenv;
 
-use aws_config::{meta::region::RegionProviderChain, SdkConfig};
+use aws_config::{meta::region::RegionProviderChain, BehaviorVersion, SdkConfig};
 use aws_sdk_s3::{
     config::Region,
     error::SdkError,
@@ -23,7 +23,8 @@ use aws_sdk_s3::{
 };
 
 use aws_sdk_secretsmanager::Client as SecretsClient;
-use aws_smithy_http::byte_stream::{ByteStream, Length};
+use aws_smithy_types::byte_stream::Length;
+use aws_sdk_s3::primitives::ByteStream;
 use indicatif::HumanBytes;
 use std::path::PathBuf;
 
@@ -33,7 +34,10 @@ pub async fn new_config() -> SdkConfig {
     let region_provider = RegionProviderChain::first_try(Region::new("us-east-1"))
         .or_default_provider()
         .or_else(Region::new("us-east-1"));
-    aws_config::from_env().region(region_provider).load().await
+    aws_config::defaults(BehaviorVersion::latest())
+        .region(region_provider)
+        .load()
+        .await
 }
 
 pub async fn new_secrets_client() -> SecretsClient {

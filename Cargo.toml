@@ -7,11 +7,10 @@ edition = "2021"
 
 [dependencies]
 async-recursion = "1.0.4"
-aws-config = "0.55.3"
-aws-sdk-s3 = "0.28.0"
-aws-sdk-secretsmanager = "0.28.0"
-aws-smithy-http = "0.55.3"
-aws-smithy-types = "0.55.3"
+aws-config = "1"
+aws-sdk-s3 = "1"
+aws-sdk-secretsmanager = "1"
+aws-smithy-types = { version = "1", features = ["http-body-0-4-x"] }
 clap = { version = "4.3.10", features = ["derive"] }
 console = "0.15.7"
 dotenv = "0.15.0"
