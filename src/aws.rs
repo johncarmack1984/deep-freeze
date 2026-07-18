@@ -407,7 +407,7 @@ pub async fn confirm_upload_size(
     key: &String,
 ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
     let s3_attrs: GetObjectAttributesOutput = get_s3_attrs(&aws, &bucket, &key).await?;
-    let s3_size = s3_attrs.object_size();
+    let s3_size = s3_attrs.object_size().unwrap_or_default();
     let dropbox_size = db::get_dropbox_size(&sqlite, &dropbox_id);
     match s3_size == dropbox_size {
         true => return Ok(()),
@@ -549,7 +549,11 @@ mod tests {
         .await
         .unwrap();
         let attrs = crate::aws::get_s3_attrs(&aws, &BUCKET, &key).await.unwrap();
-        assert_eq!(attrs.object_size(), local_size, "🚫  sizes don't match");
+        assert_eq!(
+            attrs.object_size().unwrap_or_default(),
+            local_size,
+            "🚫  sizes don't match"
+        );
         assert!(
             crate::aws::delete_from_s3(&aws, &BUCKET, &key)
                 .await

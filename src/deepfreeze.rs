@@ -163,7 +163,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
                 0
             }
         },
-        Ok(s3_attrs) => match s3_attrs.object_size() == dropbox_size {
+        Ok(s3_attrs) => match s3_attrs.object_size().unwrap_or_default() == dropbox_size {
             true => {
                 println!("✅  Files the same size on DB & S3");
                 db::set_migrated(&sqlite, &dropbox_id);
@@ -173,7 +173,7 @@ async fn check_migration_status(aws: &AWSClient, sqlite: &DBConnection, row: &DB
             false => {
                 println!("❌  File exists on S3, but is not the correct size");
                 println!("🗳️  DB size: {dropbox_size}");
-                println!("🗂️  S3 size: {}", s3_attrs.object_size());
+                println!("🗂️  S3 size: {}", s3_attrs.object_size().unwrap_or_default());
                 aws::delete_from_s3(&aws, &bucket, &key).await.unwrap();
                 db::set_unmigrated(&sqlite, &dropbox_id);
                 0
