@@ -8,8 +8,12 @@ edition = "2021"
 [dependencies]
 async-recursion = "1.0.4"
 aws-config = "1"
-aws-sdk-s3 = "1"
-aws-sdk-secretsmanager = "1"
+# The SDK defaults minus `rustls`, which only compiles in the legacy hyper 0.14 /
+# rustls 0.21 client. BehaviorVersion::latest() already picks the hyper 1
+# `default-https-client`, so the legacy one was never used. S3 also drops
+# `sigv4a`, which only Multi-Region Access Points sign with.
+aws-sdk-s3 = { version = "1", default-features = false, features = ["http-1x", "default-https-client", "rt-tokio"] }
+aws-sdk-secretsmanager = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-smithy-types = { version = "1", features = ["http-body-0-4-x"] }
 clap = { version = "4.3.10", features = ["derive"] }
 console = "0.15.7"
